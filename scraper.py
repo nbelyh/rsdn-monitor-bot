@@ -5,6 +5,7 @@ from typing import List, Optional
 from database import ForumMessage
 import re
 import hashlib
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +19,41 @@ class RSDNScraper:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         })
     
-    def _generate_message_id(self, title: str, author: str, forum: str, time_posted: str) -> str:
-        """Generate a unique message ID from message components"""
-        # Create a unique hash from message components
-        content = f"{title}|{author}|{forum}|{time_posted}"
+    def _extract_message_id_from_url(self, url: str) -> str:
+        """Extract the actual message ID from RSDN URL"""
+        if not url:
+            return ""
+        
+        # Extract the message ID from URL like /forum/flame.politics.unfiltered/8998183
+        import re
+        match = re.search(r'/forum/[^/]+/(\d+)', url)
+        if match:
+            return match.group(1)
+        
+        # If no ID found in URL, fall back to hash (shouldn't happen with proper RSDN URLs)
+        return hashlib.md5(url.encode('utf-8')).hexdigest()[:8]
+    
+    def _is_recent_message(self, time_text: str) -> bool:
+        """Check if message is recent (posted in minutes) - these are the ones we track"""
+        return 'мин' in time_text.lower().strip()
+    
+    def _generate_message_id(self, title: str, author: str, forum: str, time_posted: str, url: str = "", last_reply_author: str = "") -> str:
+        """Generate a unique message ID - only for recent messages with minute timestamps"""
+        # First try to get the thread ID from the URL
+        thread_id = ""
+        if url:
+            rsdn_id = self._extract_message_id_from_url(url)
+            if rsdn_id and rsdn_id.isdigit():
+                thread_id = rsdn_id
+        
+        if thread_id:
+            # For threads with IDs, use thread ID + last reply author
+            # Don't include time - this will detect new replies but avoid minute-by-minute drift
+            content = f"thread_{thread_id}|{last_reply_author or author}"
+        else:
+            # Fallback: use title + authors (no time to avoid drift)
+            content = f"{title}|{author}|{last_reply_author or author}"
+        
         return hashlib.md5(content.encode('utf-8')).hexdigest()
     
     def _clean_text(self, text: str) -> str:
@@ -173,8 +205,13 @@ class RSDNScraper:
                         logger.debug(f"Skipping invalid message: title='{title}', author='{author}', forum='{forum}'")
                         continue
                     
-                    # Generate unique message ID
-                    message_id = self._generate_message_id(title, author, forum, time_posted)
+                    # Only process recent messages (posted within minutes)
+                    if not self._is_recent_message(time_posted):
+                        logger.debug(f"Skipping old message: {title} (posted {time_posted})")
+                        continue
+                    
+                    # Generate unique message ID using thread ID, last reply, and time
+                    message_id = self._generate_message_id(title, author, forum, time_posted, url, last_reply_author)
                     
                     message = ForumMessage(
                         message_id=message_id,
