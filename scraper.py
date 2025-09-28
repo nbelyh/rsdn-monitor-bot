@@ -33,22 +33,6 @@ class RSDNScraper:
         # If no ID found in URL, fall back to hash (shouldn't happen with proper RSDN URLs)
         return hashlib.md5(url.encode('utf-8')).hexdigest()[:8]
     
-    def _convert_to_direct_message_url(self, url: str) -> str:
-        """Convert thread URL to direct message URL for better navigation"""
-        if not url:
-            return url
-            
-        # Extract thread ID from URL like /forum/life/8998165
-        thread_id = self._extract_message_id_from_url(url)
-        if thread_id and thread_id.isdigit():
-            # Convert to flat view with anchor: /forum/life/8998165.flat#8998165
-            if '.flat#' not in url:  # Avoid double conversion
-                # Replace the thread URL with flat URL + anchor
-                base_url = url.rstrip('/')
-                return f"{base_url}.flat#{thread_id}"
-        
-        return url
-
     def _is_recent_message(self, time_text: str) -> bool:
         """Check if message is recent (posted in minutes) - these are the ones we track"""
         return 'мин' in time_text.lower().strip()
@@ -185,8 +169,6 @@ class RSDNScraper:
                         url = subject_link.get('href', '')
                         if url and not url.startswith('http'):
                             url = f"https://rsdn.org{url}"
-                        # Convert to direct message URL for better navigation
-                        url = self._convert_to_direct_message_url(url)
                     else:
                         title = self._clean_text(subject_cell.get_text())
                         url = ""
