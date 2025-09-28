@@ -99,21 +99,11 @@ class TelegramNotifier:
             if len(messages) > 8:
                 text += f"\n\n... и ещё {len(messages) - 8}"
             
-            # Always add inline button to filter this forum
-            keyboard = [
-                [InlineKeyboardButton(
-                    f"🚫 Не показывать сообщения из {forum}", 
-                    callback_data=f"block_forum:{forum}"
-                )]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
             await self.bot.send_message(
                 chat_id=chat_id,
                 text=text,
                 parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
-                reply_markup=reply_markup
+                disable_web_page_preview=True
             )
             
         except Exception as e:
@@ -190,13 +180,11 @@ class TelegramBotHandler:
 /stop - Отписаться от уведомлений
 /status - Показать статус бота
 /stats - Показать статистику сообщений
-/filters - Показать текущие фильтры форумов
-/reset_filters - Сбросить все фильтры форумов
+/filters - Управление фильтрами форумов
 
 <b>Как фильтровать форумы:</b>
-• Используйте кнопку "🚫 Не показывать..." под сообщениями
-• Просмотрите активные фильтры: /filters  
-• Сбросьте все фильтры: /reset_filters
+• Используйте команду /filters для интерактивного управления
+• Все функции доступны в одном меню: блокировка, разблокировка, сброс фильтров
 
 Бот автоматически сканирует форум {interval_text}.
         """
@@ -283,54 +271,64 @@ class TelegramBotHandler:
             await update.message.reply_text("❌ Ошибка при получении статистики")
     
     async def filters_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /filters command - show current forum filters"""
+        """Handle /filters command - show interactive forum filter menu"""
         try:
             chat_id = str(update.effective_chat.id)
+            
+            # Get all available forums and currently blocked forums
+            all_forums = self.db.get_all_forums()
             blocked_forums = self.db.get_chat_blocked_forums(chat_id)
             
-            if not blocked_forums:
+            if not all_forums:
                 await update.message.reply_text(
                     "📋 <b>Фильтры форумов</b>\n\n"
-                    "✅ Все форумы разрешены\n"
-                    "💡 Используйте кнопку '🚫 Не показывать...' под сообщениями для блокировки форумов",
+                    "❌ Пока нет данных о форумах.\n"
+                    "Дождитесь первого сканирования форума.",
                     parse_mode=ParseMode.HTML
                 )
+                return
+            
+            # Create header text
+            header_text = f"📋 <b>Фильтры форумов</b> ({len(blocked_forums)} заблокировано из {len(all_forums)})\n\n"
+            if blocked_forums:
+                header_text += "Нажмите на форум чтобы изменить его статус:\n"
             else:
-                filters_text = "📋 <b>Заблокированные форумы:</b>\n\n"
-                for forum in sorted(blocked_forums):
-                    filters_text += f"🚫 {forum}\n"
+                header_text += "Выберите форумы для блокировки:\n"
+            
+            # Create inline keyboard with forums (show max 10 per page)
+            keyboard = []
+            for i, forum in enumerate(sorted(all_forums)[:10]):
+                if forum in blocked_forums:
+                    # Show as blocked with ✅ to unblock
+                    button_text = f"🚫 {forum}"
+                    callback_data = f"unblock_forum:{forum}"
+                else:
+                    # Show as allowed with ❌ to block
+                    button_text = f"✅ {forum}"
+                    callback_data = f"block_forum:{forum}"
                 
-                filters_text += "\n💡 Используйте /reset_filters для сброса всех фильтров"
-                
-                await update.message.reply_text(
-                    filters_text,
-                    parse_mode=ParseMode.HTML
-                )
+                keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+            
+            # Add control buttons
+            if len(all_forums) > 10:
+                keyboard.append([InlineKeyboardButton("➡️ Больше форумов...", callback_data="forums_next:0")])
+            
+            if blocked_forums:
+                keyboard.append([InlineKeyboardButton("🗑️ Сбросить все фильтры", callback_data="reset_all_filters")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
+                header_text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+            
         except Exception as e:
             logger.error(f"Error in filters command: {e}")
             await update.message.reply_text("❌ Ошибка при получении фильтров")
     
-    async def reset_filters_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /reset_filters command - reset all forum filters"""
-        try:
-            chat_id = str(update.effective_chat.id)
-            deleted_count = self.db.reset_chat_forum_filters(chat_id)
-            
-            if deleted_count > 0:
-                await update.message.reply_text(
-                    f"✅ <b>Фильтры сброшены</b>\n\n"
-                    f"Разблокировано форумов: {deleted_count}\n"
-                    f"Теперь вы получаете уведомления из всех форумов.",
-                    parse_mode=ParseMode.HTML
-                )
-            else:
-                await update.message.reply_text(
-                    "📋 У вас нет активных фильтров форумов",
-                    parse_mode=ParseMode.HTML
-                )
-        except Exception as e:
-            logger.error(f"Error in reset filters command: {e}")
-            await update.message.reply_text("❌ Ошибка при сбросе фильтров")
+
     
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle inline button callbacks"""
@@ -344,36 +342,79 @@ class TelegramBotHandler:
             if callback_data.startswith('block_forum:'):
                 forum = callback_data.replace('block_forum:', '')
                 self.db.block_forum_for_chat(chat_id, forum)
+                await query.answer(f"🚫 Форум {forum} заблокирован", show_alert=True)
                 
-                await query.edit_message_reply_markup(
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton(
-                            f"✅ Форум {forum} заблокирован", 
-                            callback_data="blocked"
-                        )],
-                        [InlineKeyboardButton(
-                            "🔄 Разблокировать", 
-                            callback_data=f"unblock_forum:{forum}"
-                        )]
-                    ])
-                )
+                # Refresh the filters menu
+                await self._refresh_filters_menu(query)
                 
             elif callback_data.startswith('unblock_forum:'):
                 forum = callback_data.replace('unblock_forum:', '')
                 self.db.unblock_forum_for_chat(chat_id, forum)
+                await query.answer(f"✅ Форум {forum} разблокирован", show_alert=True)
                 
-                await query.edit_message_reply_markup(
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton(
-                            f"✅ Форум {forum} разблокирован", 
-                            callback_data="unblocked"
-                        )]
-                    ])
-                )
+                # Refresh the filters menu
+                await self._refresh_filters_menu(query)
+                
+            elif callback_data == 'reset_all_filters':
+                deleted_count = self.db.reset_chat_forum_filters(chat_id)
+                await query.answer(f"🗑️ Сброшено {deleted_count} фильтров", show_alert=True)
+                
+                # Refresh the filters menu
+                await self._refresh_filters_menu(query)
+                
+            elif callback_data.startswith('forums_next:'):
+                # Handle pagination (basic implementation for now)
+                await query.answer("Пагинация пока в разработке", show_alert=True)
                 
         except Exception as e:
             logger.error(f"Error handling button callback: {e}")
-            await query.message.reply_text("❌ Ошибка при обработке команды")
+            await query.answer("❌ Ошибка при обработке команды", show_alert=True)
+    
+    async def _refresh_filters_menu(self, query):
+        """Refresh the filters menu after a change"""
+        try:
+            chat_id = str(query.from_user.id)
+            
+            # Get updated forum lists
+            all_forums = self.db.get_all_forums()
+            blocked_forums = self.db.get_chat_blocked_forums(chat_id)
+            
+            # Create updated header text
+            header_text = f"📋 <b>Фильтры форумов</b> ({len(blocked_forums)} заблокировано из {len(all_forums)})\n\n"
+            if blocked_forums:
+                header_text += "Нажмите на форум чтобы изменить его статус:\n"
+            else:
+                header_text += "Выберите форумы для блокировки:\n"
+            
+            # Create updated keyboard
+            keyboard = []
+            for forum in sorted(all_forums)[:10]:
+                if forum in blocked_forums:
+                    button_text = f"🚫 {forum}"
+                    callback_data = f"unblock_forum:{forum}"
+                else:
+                    button_text = f"✅ {forum}"
+                    callback_data = f"block_forum:{forum}"
+                
+                keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+            
+            # Add control buttons
+            if len(all_forums) > 10:
+                keyboard.append([InlineKeyboardButton("➡️ Больше форумов...", callback_data="forums_next:0")])
+            
+            if blocked_forums:
+                keyboard.append([InlineKeyboardButton("🗑️ Сбросить все фильтры", callback_data="reset_all_filters")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                text=header_text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup
+            )
+            
+        except Exception as e:
+            logger.error(f"Error refreshing filters menu: {e}")
     
     def setup_handlers(self):
         """Setup command handlers"""
@@ -385,7 +426,6 @@ class TelegramBotHandler:
         self.application.add_handler(CommandHandler("status", self.status_command))
         self.application.add_handler(CommandHandler("stats", self.stats_command))
         self.application.add_handler(CommandHandler("filters", self.filters_command))
-        self.application.add_handler(CommandHandler("reset_filters", self.reset_filters_command))
         self.application.add_handler(CallbackQueryHandler(self.button_callback))
     
     async def start_bot(self):
@@ -414,8 +454,7 @@ class TelegramBotHandler:
                 BotCommand("stop", "🛑 Отписаться от уведомлений"),
                 BotCommand("status", "📊 Показать статус бота"),
                 BotCommand("stats", "📈 Статистика сообщений"),
-                BotCommand("filters", "🔍 Текущие фильтры форумов"),
-                BotCommand("reset_filters", "🗑️ Сбросить все фильтры")
+                BotCommand("filters", "� Управление фильтрами форумов")
             ]
             
             await self.application.bot.set_my_commands(commands)

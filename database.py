@@ -198,6 +198,17 @@ class DatabaseManager:
                 'forum_stats': forum_stats
             }
     
+    def get_all_forums(self) -> List[str]:
+        """Get list of all forums that have messages in the database"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT DISTINCT forum 
+                FROM seen_messages 
+                ORDER BY forum
+            """)
+            return [row[0] for row in cursor.fetchall()]
+    
     def get_chat_blocked_forums(self, chat_id: str) -> set:
         """Get list of forums blocked by chat"""
         with sqlite3.connect(self.db_path) as conn:
