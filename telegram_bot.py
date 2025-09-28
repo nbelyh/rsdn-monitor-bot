@@ -217,18 +217,23 @@ class TelegramBotHandler:
         self.application.add_handler(CommandHandler("stats", self.stats_command))
     
     async def start_bot(self):
-        """Start the Telegram bot"""
+        """Start the Telegram bot with polling"""
         try:
             self.setup_handlers()
             await self.application.initialize()
             await self.application.start()
-            logger.info("Telegram bot started successfully")
+            
+            # Start polling for updates
+            await self.application.updater.start_polling()
+            logger.info("Telegram bot started successfully with polling")
         except Exception as e:
             logger.error(f"Error starting Telegram bot: {e}")
     
     async def stop_bot(self):
         """Stop the Telegram bot"""
         try:
+            if self.application and self.application.updater:
+                await self.application.updater.stop()
             if self.application:
                 await self.application.stop()
                 await self.application.shutdown()
