@@ -136,11 +136,6 @@ if thread_id and latest_message_id:
 ### 6. Multi-Chat Architecture Conversion
 **Major Enhancement**: Converted from single-user to multi-chat bot
 
-**Database Schema Migration**:
-- Renamed `user_preferences` table to `chat_preferences`
-- Changed `user_id` column to `chat_id` to properly separate forum usernames from Telegram chat IDs
-- All database methods updated from `get_user_*` to `get_chat_*` pattern
-
 **Registration System**:
 ```python
 # Users register their chats dynamically
