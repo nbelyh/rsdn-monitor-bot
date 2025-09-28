@@ -54,49 +54,88 @@ class RSDNScraper:
             return None
     
     def _get_latest_message_content(self, thread_id: str, latest_msg_id: str) -> Optional[str]:
-        """Get the latest message content using Message.aspx and timestamp correlation"""
+        """Get the latest message content by directly accessing the specific message ID"""
         try:
-            message_url = f"{self.base_url}/Forum/Message.aspx?mid={thread_id}"
+            # Try to get the specific latest message directly using the real message ID
+            message_url = f"{self.base_url}/Forum/Message.aspx?mid={latest_msg_id}"
             response = self.session.get(message_url, timeout=30)
             response.raise_for_status()
             response.encoding = 'utf-8'
             
             soup = BeautifulSoup(response.text, 'lxml')
             
-            # Find all timestamps and their associated content
-            timestamp_content_map = []
+            # Look for message content in RSDN's specific structure
+            # Messages are in div elements with class "msg-body m"
+            msg_bodies = soup.find_all('div', class_='msg-body m')
             
-            for time_elem in soup.find_all(string=re.compile(r'\d{2}\.\d{2}\.\d{2}\s+\d{1,2}:\d{2}')):
-                time_text = time_elem.strip()
-                parent = time_elem.parent
-                content = ""
-                
-                # Search for message content near this timestamp
-                for level in range(8):
-                    if parent:
-                        msg_divs = parent.find_all('div', class_=re.compile(r'msg|message'))
-                        for div in msg_divs:
-                            div_text = div.get_text(strip=True)
-                            if len(div_text) > 30 and not re.match(r'^\d{2}\.\d{2}', div_text):
-                                content = div_text
-                                break
-                        if content:
-                            break
-                        parent = parent.parent
-                
-                if content:
-                    timestamp_content_map.append({
-                        'time': time_text,
-                        'content': content
-                    })
+            content = None
             
-            # Get the latest message by timestamp
-            if timestamp_content_map:
-                latest_message = max(timestamp_content_map, key=lambda x: x['time'])
-                content = latest_message['content']
+            if msg_bodies:
+                # Get the last message (latest reply)
+                latest_msg_body = msg_bodies[-1]
                 
-                # Clean and truncate content
-                content = content.replace('\n', ' ').replace('\r', ' ').strip()
+                # Extract text content, but skip quoted parts
+                text_parts = []
+                
+                # Get all text nodes, but filter out quotes
+                for element in latest_msg_body.find_all(string=True):
+                    text = element.strip()
+                    parent = element.parent
+                    
+                    # Skip quotes (they are in spans with class containing "Quote")
+                    if parent and parent.get('class'):
+                        parent_classes = ' '.join(parent.get('class', []))
+                        if 'quote' in parent_classes.lower() or 'lineQuote' in parent_classes:
+                            continue
+                    
+                    # Skip greeting patterns and quoted text markers
+                    if (len(text) > 5 and 
+                        not text.startswith('Здравствуйте,') and
+                        not text.startswith('>') and
+                        not re.match(r'^\w+>', text) and
+                        'писали:' not in text):
+                        text_parts.append(text)
+                
+                if text_parts:
+                    # Join the text parts and clean up
+                    content = ' '.join(text_parts).strip()
+                    # Remove multiple spaces and clean formatting
+                    content = re.sub(r'\s+', ' ', content)
+                    
+                    # Remove common greeting patterns if they slipped through
+                    content = re.sub(r'Здравствуйте,\s+\w+,\s+Вы\s+писали:', '', content).strip()
+                
+                # If no clean content found, fall back to the entire text but clean it
+                if not content:
+                    full_text = latest_msg_body.get_text(strip=True)
+                    # Split by lines and take non-quoted parts
+                    lines = [line.strip() for line in full_text.split('\n')]
+                    clean_lines = []
+                    
+                    skip_next = False
+                    for line in lines:
+                        if skip_next:
+                            skip_next = False
+                            continue
+                        
+                        if ('Здравствуйте,' in line and 'писали:' in line):
+                            skip_next = True  # Skip the next line too (usually the quote)
+                            continue
+                        
+                        if (len(line) > 10 and 
+                            not line.startswith('>') and
+                            not re.match(r'^\w+>', line) and
+                            not line.startswith('M>') and
+                            not line.startswith('_>')):
+                            clean_lines.append(line)
+                    
+                    if clean_lines:
+                        # Take the most substantial line
+                        content = max(clean_lines, key=len) if clean_lines else None
+            
+            if content and len(content) > 10:
+                # Final cleanup and truncation
+                content = re.sub(r'\s+', ' ', content).strip()
                 if len(content) > 200:
                     content = content[:200].rsplit(' ', 1)[0] + "..."
                 
@@ -105,7 +144,7 @@ class RSDNScraper:
             return None
             
         except Exception as e:
-            logger.debug(f"Error getting latest message content for {thread_id}: {e}")
+            logger.debug(f"Error getting latest message content for {latest_msg_id}: {e}")
             return None
     
     def _generate_message_id(self, title: str, author: str, forum: str, time_posted: str, url: str = "", last_reply_author: str = "") -> str:
