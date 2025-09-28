@@ -398,7 +398,7 @@ class RSDNScraper:
                         latest_message_text = self._get_latest_message_content(thread_id, latest_message_id)
                     
                     # Build URL to the specific latest message
-                    latest_message_url = f"https://rsdn.org/forum/message/{latest_message_id}.1" if latest_message_id else url
+                    latest_message_url = f"https://rsdn.org/forum/message/{latest_message_id}.flat#{latest_message_id}" if latest_message_id else url
                     
                     # Use real message ID instead of generated hash
                     message = ForumMessage(
