@@ -101,7 +101,7 @@ class TelegramNotifier:
         
         # Build a clean, concise message
         text = f"<b><a href=\"{url}\">{title}</a></b>\n"
-        text += f"📁 {forum} • 👤 {author}"
+        text += f"📁 {forum} • 👤 {author} • 🕐 {html.escape(message.time_posted)}"
         
         # Add reply info if there are replies
         if message.replies_count > 0:
