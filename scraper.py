@@ -393,7 +393,9 @@ class RSDNScraper:
                     
                     # Get latest message content using our new method
                     latest_message_text = None
-                    if thread_id and replies_count > 0:
+                    if thread_id:
+                        # For new posts (0 replies), get original post content
+                        # For posts with replies, get latest reply content
                         latest_message_text = self._get_latest_message_content(thread_id, latest_message_id)
                     
                     # Build URL to the specific latest message
@@ -403,13 +405,13 @@ class RSDNScraper:
                     message = ForumMessage(
                         message_id=latest_message_id,  # Real RSDN message ID
                         title=title,
-                        author=last_reply_author or author,  # Show latest reply author, fall back to original
+                        author=last_reply_author if replies_count > 0 else author,  # Show latest reply author only if there are replies
                         forum=forum,
                         time_posted=self._parse_time(time_posted),
                         replies_count=replies_count,
-                        last_reply_author=last_reply_author,
+                        last_reply_author=last_reply_author if replies_count > 0 else None,
                         url=latest_message_url,  # Point to specific latest message
-                        last_message_text=latest_message_text  # Latest reply content
+                        last_message_text=latest_message_text  # Latest reply content or original post content
                     )
                     
                     messages.append(message)
