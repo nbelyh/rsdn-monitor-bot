@@ -66,6 +66,11 @@ class TelegramNotifier:
                     line += f" • 💬 {message.replies_count}"
                     if message.last_reply_author:
                         line += f" (последний: {html.escape(message.last_reply_author)})"
+                
+                # Add last message text preview if available
+                if message.last_message_text:
+                    line += f"\n  💬 <i>\"{html.escape(message.last_message_text)}\"</i>"
+                
                 message_lines.append(line)
             
             text = header + "\n" + "\n\n".join(message_lines)

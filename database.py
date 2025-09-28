@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ForumMessage:
     """Represents a forum message from RSDN"""
-    message_id: str  # Unique identifier (constructed from URL or similar)
+    message_id: str  # Real RSDN message ID from latest reply
     title: str
     author: str
     forum: str
@@ -18,6 +18,7 @@ class ForumMessage:
     replies_count: int
     last_reply_author: Optional[str]
     url: str
+    last_message_text: Optional[str] = None  # Latest reply content for notifications
     
     def __hash__(self):
         return hash(self.message_id)
@@ -48,6 +49,7 @@ class DatabaseManager:
                     replies_count INTEGER DEFAULT 0,
                     last_reply_author TEXT,
                     url TEXT NOT NULL,
+                    last_message_text TEXT,
                     first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -100,8 +102,8 @@ class DatabaseManager:
             cursor.execute("""
                 INSERT OR REPLACE INTO seen_messages 
                 (message_id, title, author, forum, time_posted, replies_count, 
-                 last_reply_author, url, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 last_reply_author, url, last_message_text, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """, (
                 message.message_id,
                 message.title,
@@ -110,7 +112,8 @@ class DatabaseManager:
                 message.time_posted,
                 message.replies_count,
                 message.last_reply_author,
-                message.url
+                message.url,
+                message.last_message_text
             ))
             conn.commit()
     

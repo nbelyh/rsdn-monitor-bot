@@ -37,6 +37,77 @@ class RSDNScraper:
         """Check if message is recent (posted in minutes) - these are the ones we track"""
         return 'мин' in time_text.lower().strip()
     
+    def _extract_latest_message_id_from_time_link(self, time_element) -> Optional[str]:
+        """Extract the real latest message ID from the time link in main list"""
+        try:
+            # Time links in main list point to the actual latest message
+            # Format: /forum/abroad/8998195 where 8998195 is the real message ID
+            time_link = time_element.find('a')
+            if time_link:
+                href = time_link.get('href', '')
+                match = re.search(r'/forum/[^/]+/(\d+)', href)
+                if match:
+                    return match.group(1)
+            return None
+        except Exception as e:
+            logger.debug(f"Error extracting latest message ID: {e}")
+            return None
+    
+    def _get_latest_message_content(self, thread_id: str, latest_msg_id: str) -> Optional[str]:
+        """Get the latest message content using Message.aspx and timestamp correlation"""
+        try:
+            message_url = f"{self.base_url}/Forum/Message.aspx?mid={thread_id}"
+            response = self.session.get(message_url, timeout=30)
+            response.raise_for_status()
+            response.encoding = 'utf-8'
+            
+            soup = BeautifulSoup(response.text, 'lxml')
+            
+            # Find all timestamps and their associated content
+            timestamp_content_map = []
+            
+            for time_elem in soup.find_all(string=re.compile(r'\d{2}\.\d{2}\.\d{2}\s+\d{1,2}:\d{2}')):
+                time_text = time_elem.strip()
+                parent = time_elem.parent
+                content = ""
+                
+                # Search for message content near this timestamp
+                for level in range(8):
+                    if parent:
+                        msg_divs = parent.find_all('div', class_=re.compile(r'msg|message'))
+                        for div in msg_divs:
+                            div_text = div.get_text(strip=True)
+                            if len(div_text) > 30 and not re.match(r'^\d{2}\.\d{2}', div_text):
+                                content = div_text
+                                break
+                        if content:
+                            break
+                        parent = parent.parent
+                
+                if content:
+                    timestamp_content_map.append({
+                        'time': time_text,
+                        'content': content
+                    })
+            
+            # Get the latest message by timestamp
+            if timestamp_content_map:
+                latest_message = max(timestamp_content_map, key=lambda x: x['time'])
+                content = latest_message['content']
+                
+                # Clean and truncate content
+                content = content.replace('\n', ' ').replace('\r', ' ').strip()
+                if len(content) > 200:
+                    content = content[:200].rsplit(' ', 1)[0] + "..."
+                
+                return content
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Error getting latest message content for {thread_id}: {e}")
+            return None
+    
     def _generate_message_id(self, title: str, author: str, forum: str, time_posted: str, url: str = "", last_reply_author: str = "") -> str:
         """Generate a unique message ID - only for recent messages with minute timestamps"""
         # First try to get the thread ID from the URL
@@ -153,6 +224,17 @@ class RSDNScraper:
                     else:
                         time_posted = self._clean_text(time_cell.get_text())
                     
+                    # Only process recent messages (posted within minutes)
+                    if not self._is_recent_message(time_posted):
+                        logger.debug(f"Skipping old message: {time_posted}")
+                        continue
+                    
+                    # Extract real latest message ID from time link (NEW APPROACH!)
+                    latest_message_id = self._extract_latest_message_id_from_time_link(time_cell)
+                    if not latest_message_id:
+                        logger.debug(f"Could not extract latest message ID from time cell")
+                        continue
+                    
                     # Extract forum
                     forum_cell = cells[1]
                     forum_link = forum_cell.find('a')
@@ -205,27 +287,36 @@ class RSDNScraper:
                         logger.debug(f"Skipping invalid message: title='{title}', author='{author}', forum='{forum}'")
                         continue
                     
-                    # Only process recent messages (posted within minutes)
-                    if not self._is_recent_message(time_posted):
-                        logger.debug(f"Skipping old message: {title} (posted {time_posted})")
-                        continue
+                    # Extract thread ID from the subject URL for getting message content
+                    thread_id = ""
+                    if url:
+                        thread_match = re.search(r'/forum/[^/]+/(\d+)', url)
+                        if thread_match:
+                            thread_id = thread_match.group(1)
                     
-                    # Generate unique message ID using thread ID, last reply, and time
-                    message_id = self._generate_message_id(title, author, forum, time_posted, url, last_reply_author)
+                    # Get latest message content using our new method
+                    latest_message_text = None
+                    if thread_id and replies_count > 0:
+                        latest_message_text = self._get_latest_message_content(thread_id, latest_message_id)
                     
+                    # Use real message ID instead of generated hash
                     message = ForumMessage(
-                        message_id=message_id,
+                        message_id=latest_message_id,  # Real RSDN message ID
                         title=title,
                         author=author,
                         forum=forum,
                         time_posted=self._parse_time(time_posted),
                         replies_count=replies_count,
                         last_reply_author=last_reply_author,
-                        url=url
+                        url=url,
+                        last_message_text=latest_message_text  # Latest reply content
                     )
                     
                     messages.append(message)
-                    logger.debug(f"Parsed message: {forum} - {title} by {author}")
+                    logger.debug(f"Parsed message: {forum} - {title} by {author} (msg_id: {latest_message_id})")
+                    
+                    if latest_message_text:
+                        logger.debug(f"Latest reply preview: {latest_message_text[:50]}...")
                     
                 except Exception as e:
                     logger.debug(f"Error parsing row {row_idx}: {e}")
