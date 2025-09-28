@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "runtime": {
+    "python": {
+      "version": "3.11"
+    }
+  },
+  "startup": {
+    "command": "bash startup.sh"
+  },
+  "environmentVariables": {
+    "SCM_DO_BUILD_DURING_DEPLOYMENT": "true",
+    "PYTHONPATH": "/home/site/wwwroot"
+  }
+}
