@@ -165,8 +165,8 @@ You can customize your bot further:
    # Replace with your actual chat ID (number, not username)
    TELEGRAM_CHAT_ID=123456789
    
-   # How often to check for new messages (in seconds)
-   SCAN_INTERVAL_SECONDS=60
+   # How often to check for new messages (in minutes)
+   CHECK_INTERVAL_MINUTES=1
    
    # Optional: Monitor only specific forums (comma-separated)
    # Leave empty to monitor all forums
@@ -206,7 +206,7 @@ The bot will:
 |----------|-------------|---------|
 | `TELEGRAM_BOT_TOKEN` | Your Telegram bot token | *Required* |
 | `TELEGRAM_CHAT_ID` | Your Telegram chat ID | *Required* |
-| `SCAN_INTERVAL_SECONDS` | How often to check for new messages | 60 |
+| `CHECK_INTERVAL_MINUTES` | How often to check for new messages (in minutes) | 1 |
 | `RSDN_URL` | RSDN forum URL | https://rsdn.org/forum/ |
 | `DATABASE_FILE` | SQLite database file path | rsdn_messages.db |
 | `LOG_LEVEL` | Logging level (DEBUG/INFO/WARNING/ERROR) | INFO |
@@ -300,7 +300,7 @@ The bot includes comprehensive error handling:
 - Look at the log file for any errors
 
 ### Too many notifications
-- Increase `SCAN_INTERVAL_SECONDS` to reduce frequency
+- Increase `CHECK_INTERVAL_MINUTES` to reduce frequency
 - Use `MONITORED_FORUMS` to filter specific forums only
 - Check if the database was reset (causing all messages to appear as new)
 

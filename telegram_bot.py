@@ -128,15 +128,24 @@ class TelegramNotifier:
 class TelegramBotHandler:
     """Handles Telegram bot commands and interactions"""
     
-    def __init__(self, bot_token: str, chat_id: str, database_manager: 'DatabaseManager'):
+    def __init__(self, bot_token: str, chat_id: str, database_manager: 'DatabaseManager', scan_interval_minutes: int = 1):
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.db = database_manager
+        self.scan_interval_minutes = scan_interval_minutes
         self.application = None
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
-        welcome_text = """
+        # Format interval display in Russian
+        if self.scan_interval_minutes == 1:
+            interval_text = "каждую минуту"
+        elif 2 <= self.scan_interval_minutes <= 4:
+            interval_text = f"каждые {self.scan_interval_minutes} минуты"
+        else:
+            interval_text = f"каждые {self.scan_interval_minutes} минут"
+        
+        welcome_text = f"""
 🤖 <b>RSDN Forum Bot</b>
 
 Этот бот отслеживает новые сообщения на форуме RSDN.org и присылает уведомления.
@@ -153,7 +162,7 @@ class TelegramBotHandler:
 • Просмотрите активные фильтры: /filters  
 • Сбросьте все фильтры: /reset_filters
 
-Бот автоматически сканирует форум каждую минуту.
+Бот автоматически сканирует форум {interval_text}.
         """
         
         await update.message.reply_text(

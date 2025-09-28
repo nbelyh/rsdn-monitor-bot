@@ -29,7 +29,7 @@ class RSDNBot:
         self.db = DatabaseManager(self.database_file)
         self.scraper = RSDNScraper(self.rsdn_url, db_manager=self.db)
         self.telegram_notifier = TelegramNotifier(self.bot_token, self.chat_id, self.db)
-        self.telegram_handler = TelegramBotHandler(self.bot_token, self.chat_id, self.db)
+        self.telegram_handler = TelegramBotHandler(self.bot_token, self.chat_id, self.db, self.scan_interval_minutes)
         
         # Scheduler for periodic tasks
         self.scheduler = AsyncIOScheduler()
@@ -63,7 +63,12 @@ class RSDNBot:
         """Load configuration from environment variables"""
         self.bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
         self.chat_id = os.getenv('TELEGRAM_CHAT_ID')
-        self.scan_interval = int(os.getenv('SCAN_INTERVAL_SECONDS', '60'))
+        
+        # Get check interval in minutes (convert to seconds for internal use)
+        check_interval_minutes = int(os.getenv('CHECK_INTERVAL_MINUTES', '1'))
+        self.scan_interval = check_interval_minutes * 60  # Convert to seconds for scheduler
+        self.scan_interval_minutes = check_interval_minutes  # Keep original minutes for display
+            
         self.rsdn_url = os.getenv('RSDN_URL', 'https://rsdn.org')
         self.database_file = os.getenv('DATABASE_FILE', 'rsdn_messages.db')
         
