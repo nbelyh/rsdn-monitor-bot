@@ -326,8 +326,15 @@ class RSDNScraper:
                         logger.debug(f"Skipping old message: {time_posted}")
                         continue
                     
-                    # Extract real latest message ID from time link (NEW APPROACH!)
-                    latest_message_id = self._extract_latest_message_id_from_time_link(time_cell)
+                    # Extract real latest message ID from subject link
+                    subject_cell = cells[2]
+                    subject_link = subject_cell.find('a')
+                    latest_message_id = None
+                    if subject_link:
+                        href = subject_link.get('href', '')
+                        match = re.search(r'/forum/[^/]+/(\d+)', href)
+                        if match:
+                            latest_message_id = match.group(1)
                     if not latest_message_id:
                         logger.debug(f"Could not extract latest message ID from time cell")
                         continue
@@ -393,9 +400,8 @@ class RSDNScraper:
                     
                     # Get latest message content using our new method
                     latest_message_text = None
-                    if thread_id:
-                        # For new posts (0 replies), get original post content
-                        # For posts with replies, get latest reply content
+                    if thread_id and latest_message_id:
+                        # Get content for both messages with and without replies
                         latest_message_text = self._get_latest_message_content(thread_id, latest_message_id)
                     
                     # Build URL to the specific latest message
@@ -405,7 +411,7 @@ class RSDNScraper:
                     message = ForumMessage(
                         message_id=latest_message_id,  # Real RSDN message ID
                         title=title,
-                        author=last_reply_author if replies_count > 0 else author,  # Show latest reply author only if there are replies
+                        author=last_reply_author if (replies_count > 0 and last_reply_author) else author,  # Show original author for messages without replies
                         forum=forum,
                         time_posted=self._parse_time(time_posted),
                         replies_count=replies_count,
