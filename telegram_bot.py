@@ -297,7 +297,7 @@ class TelegramBotHandler:
             
             # Create inline keyboard with forums (show max 10 per page)
             keyboard = []
-            for i, forum in enumerate(sorted(all_forums)[:10]):
+            for forum in sorted(all_forums):
                 if forum in blocked_forums:
                     # Show as blocked with ✅ to unblock
                     button_text = f"🚫 {forum}"
@@ -308,10 +308,6 @@ class TelegramBotHandler:
                     callback_data = f"block_forum:{forum}"
                 
                 keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
-            
-            # Add control buttons
-            if len(all_forums) > 10:
-                keyboard.append([InlineKeyboardButton("➡️ Больше форумов...", callback_data="forums_next:0")])
             
             if blocked_forums:
                 keyboard.append([InlineKeyboardButton("🗑️ Сбросить все фильтры", callback_data="reset_all_filters")])
@@ -362,9 +358,7 @@ class TelegramBotHandler:
                 # Refresh the filters menu
                 await self._refresh_filters_menu(query)
                 
-            elif callback_data.startswith('forums_next:'):
-                # Handle pagination (basic implementation for now)
-                await query.answer("Пагинация пока в разработке", show_alert=True)
+
                 
         except Exception as e:
             logger.error(f"Error handling button callback: {e}")
@@ -388,7 +382,7 @@ class TelegramBotHandler:
             
             # Create updated keyboard
             keyboard = []
-            for forum in sorted(all_forums)[:10]:
+            for forum in sorted(all_forums):
                 if forum in blocked_forums:
                     button_text = f"🚫 {forum}"
                     callback_data = f"unblock_forum:{forum}"
@@ -397,10 +391,6 @@ class TelegramBotHandler:
                     callback_data = f"block_forum:{forum}"
                 
                 keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
-            
-            # Add control buttons
-            if len(all_forums) > 10:
-                keyboard.append([InlineKeyboardButton("➡️ Больше форумов...", callback_data="forums_next:0")])
             
             if blocked_forums:
                 keyboard.append([InlineKeyboardButton("🗑️ Сбросить все фильтры", callback_data="reset_all_filters")])
