@@ -1,7 +1,7 @@
 import logging
 from typing import List, Optional, Set
-from telegram import Bot, Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.constants import ParseMode
 import html
 
@@ -10,19 +10,26 @@ logger = logging.getLogger(__name__)
 class TelegramNotifier:
     """Handles Telegram bot notifications"""
     
-    def __init__(self, bot_token: str, chat_id: str):
+    def __init__(self, bot_token: str, chat_id: str, db_manager: 'DatabaseManager' = None):
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.bot = Bot(token=bot_token)
+        self.db = db_manager  # Add database manager for user filtering
     
     async def send_new_messages(self, messages: List['ForumMessage'], monitored_forums: Optional[Set[str]] = None):
-        """Send notifications for new forum messages"""
+        """Send notifications for new forum messages with user filtering"""
         if not messages:
             return
         
         # Filter messages by monitored forums if specified
         if monitored_forums:
             messages = [msg for msg in messages if msg.forum in monitored_forums]
+        
+        # Get user's blocked forums and filter them out
+        if self.db:
+            user_blocked_forums = self.db.get_user_blocked_forums(self.chat_id)
+            if user_blocked_forums:
+                messages = [msg for msg in messages if msg.forum not in user_blocked_forums]
         
         if not messages:
             return
@@ -46,16 +53,26 @@ class TelegramNotifier:
             logger.error(f"Error sending Telegram notifications: {e}")
     
     async def _send_single_message_notification(self, message: 'ForumMessage'):
-        """Send notification for a single message"""
+        """Send notification for a single message with filter button"""
         try:
             # Format the message
             text = self._format_message(message)
+            
+            # Add inline button to filter this forum
+            keyboard = [
+                [InlineKeyboardButton(
+                    f"🚫 Не показывать сообщения из {message.forum}", 
+                    callback_data=f"block_forum:{message.forum}"
+                )]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
             
             await self.bot.send_message(
                 chat_id=self.chat_id,
                 text=text,
                 parse_mode=ParseMode.HTML,
-                disable_web_page_preview=False
+                disable_web_page_preview=False,
+                reply_markup=reply_markup
             )
             
         except Exception as e:
@@ -153,6 +170,13 @@ class TelegramBotHandler:
 /start - Показать это сообщение
 /status - Показать статус бота
 /stats - Показать статистику сообщений
+/filters - Показать текущие фильтры форумов
+/reset_filters - Сбросить все фильтры форумов
+
+<b>Как фильтровать форумы:</b>
+• Используйте кнопку "🚫 Не показывать..." под сообщениями
+• Просмотрите активные фильтры: /filters  
+• Сбросьте все фильтры: /reset_filters
 
 Бот автоматически сканирует форум каждую минуту.
         """
@@ -207,6 +231,99 @@ class TelegramBotHandler:
             logger.error(f"Error in stats command: {e}")
             await update.message.reply_text("❌ Ошибка при получении статистики")
     
+    async def filters_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /filters command - show current forum filters"""
+        try:
+            user_id = str(update.effective_user.id)
+            blocked_forums = self.db.get_user_blocked_forums(user_id)
+            
+            if not blocked_forums:
+                await update.message.reply_text(
+                    "📋 <b>Фильтры форумов</b>\n\n"
+                    "✅ Все форумы разрешены\n"
+                    "💡 Используйте кнопку '🚫 Не показывать...' под сообщениями для блокировки форумов",
+                    parse_mode=ParseMode.HTML
+                )
+            else:
+                filters_text = "📋 <b>Заблокированные форумы:</b>\n\n"
+                for forum in sorted(blocked_forums):
+                    filters_text += f"🚫 {forum}\n"
+                
+                filters_text += "\n💡 Используйте /reset_filters для сброса всех фильтров"
+                
+                await update.message.reply_text(
+                    filters_text,
+                    parse_mode=ParseMode.HTML
+                )
+        except Exception as e:
+            logger.error(f"Error in filters command: {e}")
+            await update.message.reply_text("❌ Ошибка при получении фильтров")
+    
+    async def reset_filters_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /reset_filters command - reset all forum filters"""
+        try:
+            user_id = str(update.effective_user.id)
+            deleted_count = self.db.reset_user_forum_filters(user_id)
+            
+            if deleted_count > 0:
+                await update.message.reply_text(
+                    f"✅ <b>Фильтры сброшены</b>\n\n"
+                    f"Разблокировано форумов: {deleted_count}\n"
+                    f"Теперь вы получаете уведомления из всех форумов.",
+                    parse_mode=ParseMode.HTML
+                )
+            else:
+                await update.message.reply_text(
+                    "📋 У вас нет активных фильтров форумов",
+                    parse_mode=ParseMode.HTML
+                )
+        except Exception as e:
+            logger.error(f"Error in reset filters command: {e}")
+            await update.message.reply_text("❌ Ошибка при сбросе фильтров")
+    
+    async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle inline button callbacks"""
+        query = update.callback_query
+        await query.answer()
+        
+        try:
+            user_id = str(query.from_user.id)
+            callback_data = query.data
+            
+            if callback_data.startswith('block_forum:'):
+                forum = callback_data.replace('block_forum:', '')
+                self.db.block_forum_for_user(user_id, forum)
+                
+                await query.edit_message_reply_markup(
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton(
+                            f"✅ Форум {forum} заблокирован", 
+                            callback_data="blocked"
+                        )],
+                        [InlineKeyboardButton(
+                            "🔄 Разблокировать", 
+                            callback_data=f"unblock_forum:{forum}"
+                        )]
+                    ])
+                )
+                
+            elif callback_data.startswith('unblock_forum:'):
+                forum = callback_data.replace('unblock_forum:', '')
+                self.db.unblock_forum_for_user(user_id, forum)
+                
+                await query.edit_message_reply_markup(
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton(
+                            f"✅ Форум {forum} разблокирован", 
+                            callback_data="unblocked"
+                        )]
+                    ])
+                )
+                
+        except Exception as e:
+            logger.error(f"Error handling button callback: {e}")
+            await query.message.reply_text("❌ Ошибка при обработке команды")
+    
     def setup_handlers(self):
         """Setup command handlers"""
         if not self.application:
@@ -215,6 +332,9 @@ class TelegramBotHandler:
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("status", self.status_command))
         self.application.add_handler(CommandHandler("stats", self.stats_command))
+        self.application.add_handler(CommandHandler("filters", self.filters_command))
+        self.application.add_handler(CommandHandler("reset_filters", self.reset_filters_command))
+        self.application.add_handler(CallbackQueryHandler(self.button_callback))
     
     async def start_bot(self):
         """Start the Telegram bot with polling"""

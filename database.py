@@ -63,6 +63,23 @@ class DatabaseManager:
                 ON seen_messages(first_seen)
             """)
             
+            # Create user preferences table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_preferences (
+                    user_id TEXT NOT NULL,
+                    preference_key TEXT NOT NULL,
+                    preference_value TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, preference_key)
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_user_prefs 
+                ON user_preferences(user_id)
+            """)
+            
             conn.commit()
             logger.info("Database initialized successfully")
     
@@ -148,3 +165,55 @@ class DatabaseManager:
                 'total_messages': total_messages,
                 'forum_stats': forum_stats
             }
+    
+    def get_user_blocked_forums(self, user_id: str) -> set:
+        """Get list of forums blocked by user"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT preference_value 
+                FROM user_preferences 
+                WHERE user_id = ? AND preference_key = 'blocked_forum'
+            """, (user_id,))
+            
+            blocked_forums = set()
+            for row in cursor.fetchall():
+                blocked_forums.add(row[0])
+            
+            return blocked_forums
+    
+    def block_forum_for_user(self, user_id: str, forum: str):
+        """Block a forum for a specific user"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO user_preferences 
+                (user_id, preference_key, preference_value, updated_at)
+                VALUES (?, 'blocked_forum', ?, CURRENT_TIMESTAMP)
+            """, (user_id, forum))
+            conn.commit()
+            logger.info(f"Blocked forum '{forum}' for user {user_id}")
+    
+    def unblock_forum_for_user(self, user_id: str, forum: str):
+        """Unblock a forum for a specific user"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM user_preferences 
+                WHERE user_id = ? AND preference_key = 'blocked_forum' AND preference_value = ?
+            """, (user_id, forum))
+            conn.commit()
+            logger.info(f"Unblocked forum '{forum}' for user {user_id}")
+    
+    def reset_user_forum_filters(self, user_id: str):
+        """Reset all forum filters for a user"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM user_preferences 
+                WHERE user_id = ? AND preference_key = 'blocked_forum'
+            """, (user_id,))
+            deleted_count = cursor.rowcount
+            conn.commit()
+            logger.info(f"Reset {deleted_count} forum filters for user {user_id}")
+            return deleted_count
