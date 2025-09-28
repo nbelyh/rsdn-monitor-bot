@@ -56,15 +56,27 @@ def status():
 @app.route('/trigger', methods=['POST'])
 def manual_trigger():
     """Manual trigger endpoint for testing"""
-    if bot_instance:
+    try:
+        # Import here to avoid issues
+        from main import RSDNBot
+        import asyncio
+        
+        # Create a temporary bot instance for testing
+        temp_bot = RSDNBot()
+        
+        # Run a single check
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
         try:
-            # This would trigger a manual run
-            asyncio.create_task(bot_instance.check_and_notify())
-            return jsonify({"status": "triggered"})
-        except Exception as e:
-            return jsonify({"status": "error", "message": str(e)}), 500
-    else:
-        return jsonify({"status": "bot_not_running"}), 500
+            result = loop.run_until_complete(temp_bot.check_and_notify())
+            return jsonify({"status": "triggered", "result": "check completed"})
+        finally:
+            loop.close()
+            
+    except Exception as e:
+        logger.error(f"Manual trigger error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 def run_bot():
     """Run the bot in a separate thread"""
@@ -72,14 +84,26 @@ def run_bot():
     try:
         bot_instance = RSDNBot()
         
-        # Run the bot
+        # For Azure App Service, we need to avoid signal handlers in threads
+        # Run the bot check directly without the full scheduler
+        import asyncio
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
+        async def periodic_check():
+            """Periodic check without signal handlers"""
+            while True:
+                try:
+                    await bot_instance.check_and_notify()
+                    await asyncio.sleep(60)  # Check every minute
+                except Exception as e:
+                    logger.error(f"Error in periodic check: {e}")
+                    await asyncio.sleep(60)
+        
         try:
-            loop.run_until_complete(bot_instance.run())
-        except KeyboardInterrupt:
-            logger.info("Bot stopped by user")
+            loop.run_until_complete(periodic_check())
+        except Exception as e:
+            logger.error(f"Bot loop error: {e}")
         finally:
             loop.close()
     except Exception as e:
