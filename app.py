@@ -92,6 +92,10 @@ def run_bot():
         
         async def periodic_check():
             """Periodic check without signal handlers"""
+            # Start the Telegram bot handler first
+            await bot_instance.telegram_handler.start_bot()
+            logger.info("Telegram bot handler started")
+            
             while True:
                 try:
                     await bot_instance.scan_and_notify()
@@ -105,6 +109,9 @@ def run_bot():
         except Exception as e:
             logger.error(f"Bot loop error: {e}")
         finally:
+            # Cleanup
+            if bot_instance and hasattr(bot_instance, 'telegram_handler'):
+                loop.run_until_complete(bot_instance.telegram_handler.stop_bot())
             loop.close()
     except Exception as e:
         logger.error(f"Error running bot: {e}")
