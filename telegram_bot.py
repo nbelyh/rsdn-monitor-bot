@@ -42,51 +42,26 @@ class TelegramNotifier:
                     messages_by_forum[message.forum] = []
                 messages_by_forum[message.forum].append(message)
             
-            # Send notifications for each forum
+            # Send notifications for each forum (always use grouped format)
             for forum, forum_messages in messages_by_forum.items():
-                if len(forum_messages) == 1:
-                    await self._send_single_message_notification(forum_messages[0])
-                else:
-                    await self._send_multiple_messages_notification(forum, forum_messages)
+                await self._send_forum_messages_notification(forum, forum_messages)
                     
         except Exception as e:
             logger.error(f"Error sending Telegram notifications: {e}")
     
-    async def _send_single_message_notification(self, message: 'ForumMessage'):
-        """Send notification for a single message with filter button"""
+    async def _send_forum_messages_notification(self, forum: str, messages: List['ForumMessage']):
+        """Send notification for messages from a forum (unified format with timestamps and filter button)"""
         try:
-            # Format the message
-            text = self._format_message(message)
-            
-            # Add inline button to filter this forum
-            keyboard = [
-                [InlineKeyboardButton(
-                    f"🚫 Не показывать сообщения из {message.forum}", 
-                    callback_data=f"block_forum:{message.forum}"
-                )]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=text,
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=False,
-                reply_markup=reply_markup
-            )
-            
-        except Exception as e:
-            logger.error(f"Error sending single message notification: {e}")
-    
-    async def _send_multiple_messages_notification(self, forum: str, messages: List['ForumMessage']):
-        """Send notification for multiple messages from the same forum"""
-        try:
-            header = f"🔥 <b>{len(messages)} новых в {html.escape(forum)}</b>\n"
+            # Header with forum name and count
+            if len(messages) == 1:
+                header = f"📝 <b>{html.escape(forum)}</b>\n"
+            else:
+                header = f"🔥 <b>{len(messages)} новых в {html.escape(forum)}</b>\n"
             
             message_lines = []
             for message in messages[:8]:  # Limit to 8 messages to keep it clean
                 line = f"• <a href=\"{html.escape(message.url)}\">{html.escape(message.title)}</a>"
-                line += f"\n  👤 {html.escape(message.author)}"
+                line += f"\n  👤 {html.escape(message.author)} • 🕐 {html.escape(message.time_posted)}"
                 if message.replies_count > 0:
                     line += f" • 💬 {message.replies_count}"
                     if message.last_reply_author:
@@ -98,36 +73,25 @@ class TelegramNotifier:
             if len(messages) > 8:
                 text += f"\n\n... и ещё {len(messages) - 8}"
             
+            # Always add inline button to filter this forum
+            keyboard = [
+                [InlineKeyboardButton(
+                    f"🚫 Не показывать сообщения из {forum}", 
+                    callback_data=f"block_forum:{forum}"
+                )]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
             await self.bot.send_message(
                 chat_id=self.chat_id,
                 text=text,
                 parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True
+                disable_web_page_preview=True,
+                reply_markup=reply_markup
             )
             
         except Exception as e:
-            logger.error(f"Error sending multiple messages notification: {e}")
-    
-    def _format_message(self, message: 'ForumMessage') -> str:
-        """Format a single message for Telegram - clean and concise"""
-        # Escape HTML characters
-        title = html.escape(message.title)
-        author = html.escape(message.author)
-        forum = html.escape(message.forum)
-        url = html.escape(message.url)
-        
-        # Build a clean, concise message
-        text = f"<b><a href=\"{url}\">{title}</a></b>\n"
-        text += f"📁 {forum} • 👤 {author} • 🕐 {html.escape(message.time_posted)}"
-        
-        # Add reply info if there are replies
-        if message.replies_count > 0:
-            text += f" • 💬 {message.replies_count}"
-            if message.last_reply_author:
-                last_author = html.escape(message.last_reply_author)
-                text += f" (последний: {last_author})"
-        
-        return text
+            logger.error(f"Error sending forum messages notification: {e}")
     
     async def send_status_message(self, text: str):
         """Send a status message to the chat"""
