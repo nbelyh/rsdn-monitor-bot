@@ -261,9 +261,12 @@ class TelegramBotHandler:
         """Handle /stats command"""
         try:
             stats = self.db.get_stats()
+            registered_chats_count = self.db.get_registered_chats_count()
+            
             stats_text = f"""
 📈 <b>Детальная статистика</b>
 
+👥 <b>Зарегистрированных чатов:</b> {registered_chats_count}
 📝 <b>Всего сообщений:</b> {stats['total_messages']}
 
 <b>Статистика по форумам:</b>

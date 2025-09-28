@@ -299,3 +299,13 @@ class DatabaseManager:
                 ORDER BY created_at
             """)
             return [row[0] for row in cursor.fetchall()]
+    
+    def get_registered_chats_count(self) -> int:
+        """Get count of registered chats"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM chat_preferences 
+                WHERE preference_key = 'registered' AND preference_value = 'true'
+            """)
+            return cursor.fetchone()[0]
