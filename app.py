@@ -69,7 +69,7 @@ def manual_trigger():
         asyncio.set_event_loop(loop)
         
         try:
-            result = loop.run_until_complete(temp_bot.check_and_notify())
+            result = loop.run_until_complete(temp_bot.scan_and_notify())
             return jsonify({"status": "triggered", "result": "check completed"})
         finally:
             loop.close()
@@ -94,7 +94,7 @@ def run_bot():
             """Periodic check without signal handlers"""
             while True:
                 try:
-                    await bot_instance.check_and_notify()
+                    await bot_instance.scan_and_notify()
                     await asyncio.sleep(60)  # Check every minute
                 except Exception as e:
                     logger.error(f"Error in periodic check: {e}")
