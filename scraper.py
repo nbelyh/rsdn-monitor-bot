@@ -1,24 +1,52 @@
 import requests
 import logging
 from bs4 import BeautifulSoup
-from typing import List, Optional
+from typing import List, Optional, Set, Dict
 from database import ForumMessage
 import re
 import hashlib
 from datetime import datetime, timedelta
+import time
 
 logger = logging.getLogger(__name__)
 
 class RSDNScraper:
-    """Scrapes RSDN forum for new messages"""
+    """Scrapes RSDN forum for new messages with traffic optimization"""
     
-    def __init__(self, base_url: str = "https://rsdn.org"):
+    def __init__(self, base_url: str = "https://rsdn.org", db_manager=None):
         self.base_url = base_url.rstrip('/')
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         })
+        
+        # Traffic optimization features
+        self.db_manager = db_manager
+        self._content_cache: Dict[str, tuple] = {}  # message_id -> (content, timestamp)
+        self._processed_messages: Set[str] = set()  # Already processed message IDs
+        self._last_mainlist_check: float = 0
+        self._mainlist_cache: Optional[BeautifulSoup] = None
+        self._cache_timeout = 300  # 5 minutes cache
+        
+        # Load already processed messages from database if available
+        if self.db_manager:
+            self._load_processed_messages()
     
+        # Load already processed messages from database if available
+        if self.db_manager:
+            self._load_processed_messages()
+    
+    def _load_processed_messages(self):
+        """Load already processed message IDs from database to avoid re-fetching"""
+        try:
+            # Get message IDs from last 24 hours to avoid re-processing
+            recent_messages = self.db_manager.get_recent_messages(hours=24)
+            self._processed_messages = {msg.message_id for msg in recent_messages}
+            logger.info(f"Loaded {len(self._processed_messages)} processed message IDs for cache")
+        except Exception as e:
+            logger.debug(f"Could not load processed messages: {e}")
+            self._processed_messages = set()
+
     def _extract_message_id_from_url(self, url: str) -> str:
         """Extract the actual message ID from RSDN URL"""
         if not url:
@@ -54,10 +82,24 @@ class RSDNScraper:
             return None
     
     def _get_latest_message_content(self, thread_id: str, latest_msg_id: str) -> Optional[str]:
-        """Get the latest message content by directly accessing the specific message ID"""
+        """Get the latest message content with caching to reduce traffic"""
+        # Check if we already have this content cached
+        current_time = time.time()
+        if latest_msg_id in self._content_cache:
+            content, cached_time = self._content_cache[latest_msg_id]
+            if current_time - cached_time < self._cache_timeout:
+                logger.debug(f"Using cached content for message {latest_msg_id}")
+                return content
+        
+        # Skip fetching if we've already processed this message recently
+        if latest_msg_id in self._processed_messages:
+            logger.debug(f"Skipping already processed message {latest_msg_id}")
+            return None
+            
         try:
-            # Try to get the specific latest message directly using the real message ID
+            # Fetch the content
             message_url = f"{self.base_url}/Forum/Message.aspx?mid={latest_msg_id}"
+            logger.debug(f"Fetching content for new message {latest_msg_id}")
             response = self.session.get(message_url, timeout=30)
             response.raise_for_status()
             response.encoding = 'utf-8'
@@ -139,8 +181,15 @@ class RSDNScraper:
                 if len(content) > 200:
                     content = content[:200].rsplit(' ', 1)[0] + "..."
                 
+                # Cache the content
+                self._content_cache[latest_msg_id] = (content, current_time)
+                # Mark as processed
+                self._processed_messages.add(latest_msg_id)
+                
                 return content
             
+            # Even if no content found, mark as processed to avoid re-fetching
+            self._processed_messages.add(latest_msg_id)
             return None
             
         except Exception as e:
@@ -190,14 +239,23 @@ class RSDNScraper:
             return time_text
     
     def scrape_messages(self, max_pages: int = 1, page_size: int = 50) -> List[ForumMessage]:
-        """Scrape messages from RSDN forum using the mainlist API"""
+        """Scrape messages from RSDN forum using the mainlist API with traffic optimization"""
         messages = []
+        
+        # Adaptive page size: reduce if we have many cached messages
+        cache_hit_ratio = len(self._processed_messages) / max(page_size, 1)
+        if cache_hit_ratio > 0.8 and page_size > 10:
+            # If 80%+ messages are cached, reduce page size to minimize main list requests
+            adaptive_page_size = max(10, page_size // 2)
+            logger.debug(f"High cache hit ratio ({cache_hit_ratio:.1%}), reducing page size to {adaptive_page_size}")
+        else:
+            adaptive_page_size = page_size
         
         try:
             for page in range(max_pages):
-                start = page * page_size
+                start = page * adaptive_page_size
                 # Use the mainlist API endpoint that returns HTML table
-                url = f"{self.base_url}/forum/mainlist/all?start={start}&pageSize={page_size}"
+                url = f"{self.base_url}/forum/mainlist/all?start={start}&pageSize={adaptive_page_size}"
                 
                 logger.info(f"Scraping page {page + 1}: {url}")
                 
@@ -212,7 +270,7 @@ class RSDNScraper:
                 logger.info(f"Found {len(page_messages)} messages on page {page + 1}")
                 
                 # If we got fewer messages than requested, we've reached the end
-                if len(page_messages) < page_size:
+                if len(page_messages) < adaptive_page_size:
                     break
                 
         except requests.RequestException as e:

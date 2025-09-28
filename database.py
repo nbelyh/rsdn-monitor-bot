@@ -149,6 +149,35 @@ class DatabaseManager:
             conn.commit()
             logger.info(f"Cleaned up {deleted} old messages")
     
+    def get_recent_messages(self, hours: int = 24) -> List[ForumMessage]:
+        """Get messages from the last N hours for cache optimization"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT message_id, title, author, forum, time_posted, 
+                       replies_count, last_reply_author, url, last_message_text
+                FROM seen_messages 
+                WHERE first_seen > datetime('now', '-{} hours')
+                ORDER BY first_seen DESC
+            """.format(hours))
+            
+            messages = []
+            for row in cursor.fetchall():
+                message = ForumMessage(
+                    message_id=row[0],
+                    title=row[1],
+                    author=row[2],
+                    forum=row[3],
+                    time_posted=row[4],
+                    replies_count=row[5] or 0,
+                    last_reply_author=row[6],
+                    url=row[7],
+                    last_message_text=row[8]
+                )
+                messages.append(message)
+            
+            return messages
+    
     def get_stats(self) -> dict:
         """Get database statistics"""
         with sqlite3.connect(self.db_path) as conn:

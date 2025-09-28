@@ -27,7 +27,7 @@ class RSDNBot:
         
         # Initialize components
         self.db = DatabaseManager(self.database_file)
-        self.scraper = RSDNScraper(self.rsdn_url)
+        self.scraper = RSDNScraper(self.rsdn_url, db_manager=self.db)
         self.telegram_notifier = TelegramNotifier(self.bot_token, self.chat_id, self.db)
         self.telegram_handler = TelegramBotHandler(self.bot_token, self.chat_id, self.db)
         
