@@ -61,11 +61,17 @@ class TelegramNotifier:
             message_lines = []
             for message in messages[:8]:  # Limit to 8 messages to keep it clean
                 line = f"• <a href=\"{html.escape(message.url)}\">{html.escape(message.title)}</a>"
-                line += f"\n  👤 {html.escape(message.author)} • 🕐 {html.escape(message.time_posted)}"
-                if message.replies_count > 0:
-                    line += f" • 💬 {message.replies_count}"
-                    if message.last_reply_author:
-                        line += f" (последний: {html.escape(message.last_reply_author)})"
+                
+                # Show author flow: original → latest reply author
+                if message.last_reply_author and message.replies_count > 0:
+                    # Get original author from the title parsing or use a different approach
+                    # For now, we'll show the latest reply author as the main author
+                    line += f"\n  👤 {html.escape(message.author)} • 🕐 {html.escape(message.time_posted)}"
+                    line += f" • 💬 {message.replies_count} ответов"
+                else:
+                    line += f"\n  � {html.escape(message.author)} • 🕐 {html.escape(message.time_posted)}"
+                    if message.replies_count > 0:
+                        line += f" • 💬 {message.replies_count}"
                 
                 # Add last message text preview if available
                 if message.last_message_text:

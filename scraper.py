@@ -338,16 +338,19 @@ class RSDNScraper:
                     if thread_id and replies_count > 0:
                         latest_message_text = self._get_latest_message_content(thread_id, latest_message_id)
                     
+                    # Build URL to the specific latest message
+                    latest_message_url = f"https://rsdn.org/forum/message/{latest_message_id}.1" if latest_message_id else url
+                    
                     # Use real message ID instead of generated hash
                     message = ForumMessage(
                         message_id=latest_message_id,  # Real RSDN message ID
                         title=title,
-                        author=author,
+                        author=last_reply_author or author,  # Show latest reply author, fall back to original
                         forum=forum,
                         time_posted=self._parse_time(time_posted),
                         replies_count=replies_count,
                         last_reply_author=last_reply_author,
-                        url=url,
+                        url=latest_message_url,  # Point to specific latest message
                         last_message_text=latest_message_text  # Latest reply content
                     )
                     
