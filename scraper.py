@@ -221,23 +221,6 @@ class RSDNScraper:
             return ""
         return text.strip().replace('\n', ' ').replace('\r', ' ')
     
-    def _parse_time(self, time_text: str) -> str:
-        """Parse and normalize time text"""
-        if not time_text:
-            return ""
-        
-        time_text = time_text.strip()
-        
-        # Handle Russian time formats
-        if 'мин' in time_text:
-            return time_text
-        elif 'час' in time_text:
-            return time_text
-        elif 'дн' in time_text or 'дня' in time_text or 'дней' in time_text:
-            return time_text
-        else:
-            return time_text
-    
     def scrape_messages(self, max_pages: int = 1, page_size: int = 50) -> List[ForumMessage]:
         """Scrape messages from RSDN forum using the mainlist API with traffic optimization"""
         messages = []
@@ -423,7 +406,7 @@ class RSDNScraper:
                         title=title,
                         author=last_reply_author if (replies_count > 0 and last_reply_author) else author,  # Show original author for messages without replies
                         forum=forum,
-                        time_posted=self._parse_time(time_posted),
+                        time_posted=time_posted.strip(),
                         replies_count=replies_count,
                         last_reply_author=last_reply_author if replies_count > 0 else None,
                         url=latest_message_url,  # Point to specific latest message
