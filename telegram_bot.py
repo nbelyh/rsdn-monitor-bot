@@ -64,20 +64,22 @@ class TelegramNotifier:
     async def _send_multiple_messages_notification(self, forum: str, messages: List['ForumMessage']):
         """Send notification for multiple messages from the same forum"""
         try:
-            header = f"🆕 <b>{len(messages)} новых сообщений в {html.escape(forum)}</b>\n\n"
+            header = f"🔥 <b>{len(messages)} новых в {html.escape(forum)}</b>\n"
             
             message_lines = []
-            for i, message in enumerate(messages[:10], 1):  # Limit to 10 messages
-                line = f"{i}. <a href=\"{html.escape(message.url)}\">{html.escape(message.title)}</a>"
-                line += f"\n   👤 {html.escape(message.author)} • ⏰ {html.escape(message.time_posted)}"
+            for message in messages[:8]:  # Limit to 8 messages to keep it clean
+                line = f"• <a href=\"{html.escape(message.url)}\">{html.escape(message.title)}</a>"
+                line += f"\n  👤 {html.escape(message.author)}"
                 if message.replies_count > 0:
                     line += f" • 💬 {message.replies_count}"
+                    if message.last_reply_author:
+                        line += f" (последний: {html.escape(message.last_reply_author)})"
                 message_lines.append(line)
             
-            text = header + "\n\n".join(message_lines)
+            text = header + "\n" + "\n\n".join(message_lines)
             
-            if len(messages) > 10:
-                text += f"\n\n... и ещё {len(messages) - 10} сообщений"
+            if len(messages) > 8:
+                text += f"\n\n... и ещё {len(messages) - 8}"
             
             await self.bot.send_message(
                 chat_id=self.chat_id,
@@ -90,26 +92,23 @@ class TelegramNotifier:
             logger.error(f"Error sending multiple messages notification: {e}")
     
     def _format_message(self, message: 'ForumMessage') -> str:
-        """Format a single message for Telegram"""
+        """Format a single message for Telegram - clean and concise"""
         # Escape HTML characters
         title = html.escape(message.title)
         author = html.escape(message.author)
         forum = html.escape(message.forum)
-        time_posted = html.escape(message.time_posted)
         url = html.escape(message.url)
         
-        # Build the formatted message
-        text = f"🆕 <b>Новое сообщение на RSDN</b>\n\n"
-        text += f"📂 <b>Форум:</b> {forum}\n"
-        text += f"📝 <b>Тема:</b> <a href=\"{url}\">{title}</a>\n"
-        text += f"👤 <b>Автор:</b> {author}\n"
-        text += f"⏰ <b>Время:</b> {time_posted}\n"
+        # Build a clean, concise message
+        text = f"� <b><a href=\"{url}\">{title}</a></b>\n"
+        text += f"� {forum} • 👤 {author}"
         
+        # Add reply info if there are replies
         if message.replies_count > 0:
-            text += f"💬 <b>Ответов:</b> {message.replies_count}\n"
+            text += f" • 💬 {message.replies_count}"
             if message.last_reply_author:
                 last_author = html.escape(message.last_reply_author)
-                text += f"👥 <b>Последний ответ:</b> {last_author}\n"
+                text += f" (последний: {last_author})"
         
         return text
     
