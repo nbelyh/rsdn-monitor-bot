@@ -10,46 +10,61 @@ logger = logging.getLogger(__name__)
 class TelegramNotifier:
     """Handles Telegram bot notifications"""
     
-    def __init__(self, bot_token: str, chat_id: str, db_manager: 'DatabaseManager' = None):
+    def __init__(self, bot_token: str, db_manager: 'DatabaseManager' = None):
         self.bot_token = bot_token
-        self.chat_id = chat_id
         self.bot = Bot(token=bot_token)
         self.db = db_manager  # Add database manager for user filtering
     
     async def send_new_messages(self, messages: List['ForumMessage'], monitored_forums: Optional[Set[str]] = None):
-        """Send notifications for new forum messages with user filtering"""
-        if not messages:
+        """Send notifications for new forum messages to all registered chats"""
+        if not messages or not self.db:
             return
         
         # Filter messages by monitored forums if specified
         if monitored_forums:
             messages = [msg for msg in messages if msg.forum in monitored_forums]
         
-        # Get user's blocked forums and filter them out
-        if self.db:
-            user_blocked_forums = self.db.get_user_blocked_forums(self.chat_id)
-            if user_blocked_forums:
-                messages = [msg for msg in messages if msg.forum not in user_blocked_forums]
-        
         if not messages:
             return
         
+        # Get all registered chats
+        registered_chats = self.db.get_all_registered_chats()
+        if not registered_chats:
+            logger.info("No registered chats found for notifications")
+            return
+        
+        # Send to each registered chat with their personal filters
+        for chat_id in registered_chats:
+            await self._send_messages_to_chat(chat_id, messages)
+    
+    async def _send_messages_to_chat(self, chat_id: str, messages: List['ForumMessage']):
+        """Send messages to a specific chat with their personal filters"""
         try:
+            # Get chat's blocked forums and filter them out
+            chat_blocked_forums = self.db.get_chat_blocked_forums(chat_id)
+            if chat_blocked_forums:
+                filtered_messages = [msg for msg in messages if msg.forum not in chat_blocked_forums]
+            else:
+                filtered_messages = messages
+            
+            if not filtered_messages:
+                return
+            
             # Group messages by forum for better organization
             messages_by_forum = {}
-            for message in messages:
+            for message in filtered_messages:
                 if message.forum not in messages_by_forum:
                     messages_by_forum[message.forum] = []
                 messages_by_forum[message.forum].append(message)
             
-            # Send notifications for each forum (always use grouped format)
+            # Send notifications for each forum
             for forum, forum_messages in messages_by_forum.items():
-                await self._send_forum_messages_notification(forum, forum_messages)
+                await self._send_forum_messages_notification(chat_id, forum, forum_messages)
                     
         except Exception as e:
-            logger.error(f"Error sending Telegram notifications: {e}")
+            logger.error(f"Error sending Telegram notifications to chat {chat_id}: {e}")
     
-    async def _send_forum_messages_notification(self, forum: str, messages: List['ForumMessage']):
+    async def _send_forum_messages_notification(self, chat_id: str, forum: str, messages: List['ForumMessage']):
         """Send notification for messages from a forum (unified format with timestamps and filter button)"""
         try:
             # Header with forum name and count
@@ -94,7 +109,7 @@ class TelegramNotifier:
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await self.bot.send_message(
-                chat_id=self.chat_id,
+                chat_id=chat_id,
                 text=text,
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True,
@@ -104,14 +119,29 @@ class TelegramNotifier:
         except Exception as e:
             logger.error(f"Error sending forum messages notification: {e}")
     
-    async def send_status_message(self, text: str):
-        """Send a status message to the chat"""
+    async def send_status_message(self, text: str, chat_id: str = None):
+        """Send a status message to a specific chat or all registered chats"""
         try:
-            await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=text,
-                parse_mode=ParseMode.HTML
-            )
+            if chat_id:
+                # Send to specific chat
+                await self.bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    parse_mode=ParseMode.HTML
+                )
+            else:
+                # Send to all registered chats
+                if self.db:
+                    registered_chats = self.db.get_all_registered_chats()
+                    for cid in registered_chats:
+                        try:
+                            await self.bot.send_message(
+                                chat_id=cid,
+                                text=text,
+                                parse_mode=ParseMode.HTML
+                            )
+                        except Exception as e:
+                            logger.error(f"Error sending status message to chat {cid}: {e}")
         except Exception as e:
             logger.error(f"Error sending status message: {e}")
     
@@ -128,15 +158,20 @@ class TelegramNotifier:
 class TelegramBotHandler:
     """Handles Telegram bot commands and interactions"""
     
-    def __init__(self, bot_token: str, chat_id: str, database_manager: 'DatabaseManager', scan_interval_minutes: int = 1):
+    def __init__(self, bot_token: str, database_manager: 'DatabaseManager', scan_interval_minutes: int = 1):
         self.bot_token = bot_token
-        self.chat_id = chat_id
         self.db = database_manager
         self.scan_interval_minutes = scan_interval_minutes
         self.application = None
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /start command"""
+        """Handle /start command - register chat and show welcome"""
+        chat_id = str(update.effective_chat.id)
+        chat_title = getattr(update.effective_chat, 'title', None) or getattr(update.effective_user, 'first_name', 'Unknown')
+        
+        # Register the chat for notifications
+        self.db.register_chat(chat_id, chat_title)
+        
         # Format interval display in Russian
         if self.scan_interval_minutes == 1:
             interval_text = "каждую минуту"
@@ -148,10 +183,11 @@ class TelegramBotHandler:
         welcome_text = f"""
 🤖 <b>RSDN Forum Bot</b>
 
-Этот бот отслеживает новые сообщения на форуме RSDN.org и присылает уведомления.
+✅ Этот чат зарегистрирован для получения уведомлений о новых сообщениях на форуме RSDN.org!
 
 <b>Доступные команды:</b>
-/start - Показать это сообщение
+/start - Показать это сообщение  
+/stop - Отписаться от уведомлений
 /status - Показать статус бота
 /stats - Показать статистику сообщений
 /filters - Показать текущие фильтры форумов
@@ -167,6 +203,34 @@ class TelegramBotHandler:
         
         await update.message.reply_text(
             welcome_text,
+            parse_mode=ParseMode.HTML
+        )
+    
+    async def stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /stop command - unregister chat"""
+        chat_id = str(update.effective_chat.id)
+        
+        # Check if chat is registered
+        if not self.db.is_chat_registered(chat_id):
+            await update.message.reply_text(
+                "❌ Этот чат не зарегистрирован для получения уведомлений.\n"
+                "Используйте /start для регистрации."
+            )
+            return
+        
+        # Unregister the chat
+        self.db.unregister_chat(chat_id)
+        
+        goodbye_text = """
+👋 <b>До свидания!</b>
+
+Этот чат отписан от уведомлений RSDN Forum Monitor.
+
+Чтобы снова получать уведомления, используйте /start
+        """
+        
+        await update.message.reply_text(
+            goodbye_text,
             parse_mode=ParseMode.HTML
         )
     
@@ -218,8 +282,8 @@ class TelegramBotHandler:
     async def filters_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /filters command - show current forum filters"""
         try:
-            user_id = str(update.effective_user.id)
-            blocked_forums = self.db.get_user_blocked_forums(user_id)
+            chat_id = str(update.effective_chat.id)
+            blocked_forums = self.db.get_chat_blocked_forums(chat_id)
             
             if not blocked_forums:
                 await update.message.reply_text(
@@ -246,8 +310,8 @@ class TelegramBotHandler:
     async def reset_filters_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /reset_filters command - reset all forum filters"""
         try:
-            user_id = str(update.effective_user.id)
-            deleted_count = self.db.reset_user_forum_filters(user_id)
+            chat_id = str(update.effective_chat.id)
+            deleted_count = self.db.reset_chat_forum_filters(chat_id)
             
             if deleted_count > 0:
                 await update.message.reply_text(
@@ -271,12 +335,12 @@ class TelegramBotHandler:
         await query.answer()
         
         try:
-            user_id = str(query.from_user.id)
+            chat_id = str(query.from_user.id)
             callback_data = query.data
             
             if callback_data.startswith('block_forum:'):
                 forum = callback_data.replace('block_forum:', '')
-                self.db.block_forum_for_user(user_id, forum)
+                self.db.block_forum_for_chat(chat_id, forum)
                 
                 await query.edit_message_reply_markup(
                     reply_markup=InlineKeyboardMarkup([
@@ -293,7 +357,7 @@ class TelegramBotHandler:
                 
             elif callback_data.startswith('unblock_forum:'):
                 forum = callback_data.replace('unblock_forum:', '')
-                self.db.unblock_forum_for_user(user_id, forum)
+                self.db.unblock_forum_for_chat(chat_id, forum)
                 
                 await query.edit_message_reply_markup(
                     reply_markup=InlineKeyboardMarkup([
@@ -314,6 +378,7 @@ class TelegramBotHandler:
             self.application = Application.builder().token(self.bot_token).build()
         
         self.application.add_handler(CommandHandler("start", self.start_command))
+        self.application.add_handler(CommandHandler("stop", self.stop_command))
         self.application.add_handler(CommandHandler("status", self.status_command))
         self.application.add_handler(CommandHandler("stats", self.stats_command))
         self.application.add_handler(CommandHandler("filters", self.filters_command))
@@ -327,11 +392,35 @@ class TelegramBotHandler:
             await self.application.initialize()
             await self.application.start()
             
+            # Register bot commands so they appear in Telegram UI
+            await self._register_bot_commands()
+            
             # Start polling for updates
             await self.application.updater.start_polling()
             logger.info("Telegram bot started successfully with polling")
         except Exception as e:
             logger.error(f"Error starting Telegram bot: {e}")
+    
+    async def _register_bot_commands(self):
+        """Register bot commands with Telegram so they appear in the UI"""
+        try:
+            from telegram import BotCommand
+            
+            commands = [
+                BotCommand("start", "🚀 Подписаться на уведомления"),
+                BotCommand("stop", "🛑 Отписаться от уведомлений"),
+                BotCommand("status", "📊 Показать статус бота"),
+                BotCommand("stats", "📈 Статистика сообщений"),
+                BotCommand("filters", "🔍 Текущие фильтры форумов"),
+                BotCommand("reset_filters", "🗑️ Сбросить все фильтры")
+            ]
+            
+            await self.application.bot.set_my_commands(commands)
+            logger.info("Bot commands registered successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to register bot commands: {e}")
+    
     
     async def stop_bot(self):
         """Stop the Telegram bot"""

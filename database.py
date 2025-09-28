@@ -36,7 +36,7 @@ class DatabaseManager:
         self.init_database()
     
     def init_database(self):
-        """Initialize the database with required tables"""
+        """Initialize the database with required tables"""        
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -65,21 +65,21 @@ class DatabaseManager:
                 ON seen_messages(first_seen)
             """)
             
-            # Create user preferences table
+            # Create chat preferences table (renamed from user_preferences for clarity)
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS user_preferences (
-                    user_id TEXT NOT NULL,
+                CREATE TABLE IF NOT EXISTS chat_preferences (
+                    chat_id TEXT NOT NULL,
                     preference_key TEXT NOT NULL,
                     preference_value TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (user_id, preference_key)
+                    PRIMARY KEY (chat_id, preference_key)
                 )
             """)
             
             cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_user_prefs 
-                ON user_preferences(user_id)
+                CREATE INDEX IF NOT EXISTS idx_chat_prefs 
+                ON chat_preferences(chat_id)
             """)
             
             conn.commit()
@@ -198,15 +198,15 @@ class DatabaseManager:
                 'forum_stats': forum_stats
             }
     
-    def get_user_blocked_forums(self, user_id: str) -> set:
-        """Get list of forums blocked by user"""
+    def get_chat_blocked_forums(self, chat_id: str) -> set:
+        """Get list of forums blocked by chat"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT preference_value 
-                FROM user_preferences 
-                WHERE user_id = ? AND preference_key = 'blocked_forum'
-            """, (user_id,))
+                FROM chat_preferences 
+                WHERE chat_id = ? AND preference_key = 'blocked_forum'
+            """, (chat_id,))
             
             blocked_forums = set()
             for row in cursor.fetchall():
@@ -214,38 +214,88 @@ class DatabaseManager:
             
             return blocked_forums
     
-    def block_forum_for_user(self, user_id: str, forum: str):
-        """Block a forum for a specific user"""
+    def block_forum_for_chat(self, chat_id: str, forum: str):
+        """Block a forum for a specific chat"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT OR REPLACE INTO user_preferences 
-                (user_id, preference_key, preference_value, updated_at)
+                INSERT OR REPLACE INTO chat_preferences 
+                (chat_id, preference_key, preference_value, updated_at)
                 VALUES (?, 'blocked_forum', ?, CURRENT_TIMESTAMP)
-            """, (user_id, forum))
+            """, (chat_id, forum))
             conn.commit()
-            logger.info(f"Blocked forum '{forum}' for user {user_id}")
+            logger.info(f"Blocked forum '{forum}' for chat {chat_id}")
     
-    def unblock_forum_for_user(self, user_id: str, forum: str):
-        """Unblock a forum for a specific user"""
+    def unblock_forum_for_chat(self, chat_id: str, forum: str):
+        """Unblock a forum for a specific chat"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                DELETE FROM user_preferences 
-                WHERE user_id = ? AND preference_key = 'blocked_forum' AND preference_value = ?
-            """, (user_id, forum))
+                DELETE FROM chat_preferences 
+                WHERE chat_id = ? AND preference_key = 'blocked_forum' AND preference_value = ?
+            """, (chat_id, forum))
             conn.commit()
-            logger.info(f"Unblocked forum '{forum}' for user {user_id}")
+            logger.info(f"Unblocked forum '{forum}' for chat {chat_id}")
     
-    def reset_user_forum_filters(self, user_id: str):
-        """Reset all forum filters for a user"""
+    def reset_chat_forum_filters(self, chat_id: str):
+        """Reset all forum filters for a chat"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                DELETE FROM user_preferences 
-                WHERE user_id = ? AND preference_key = 'blocked_forum'
-            """, (user_id,))
+                DELETE FROM chat_preferences 
+                WHERE chat_id = ? AND preference_key = 'blocked_forum'
+            """, (chat_id,))
             deleted_count = cursor.rowcount
             conn.commit()
-            logger.info(f"Reset {deleted_count} forum filters for user {user_id}")
+            logger.info(f"Reset {deleted_count} forum filters for chat {chat_id}")
             return deleted_count
+    
+    # Multi-chat support methods (treating each chat as a "user" for simplicity)
+    def register_chat(self, chat_id: str, chat_title: str = None):
+        """Register a chat for notifications"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO chat_preferences 
+                (chat_id, preference_key, preference_value, updated_at)
+                VALUES (?, 'registered', 'true', CURRENT_TIMESTAMP)
+            """, (chat_id,))
+            
+            if chat_title:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO chat_preferences 
+                    (chat_id, preference_key, preference_value, updated_at)
+                    VALUES (?, 'chat_title', ?, CURRENT_TIMESTAMP)
+                """, (chat_id, chat_title))
+            
+            conn.commit()
+            logger.info(f"Registered chat {chat_id} ({chat_title}) for notifications")
+    
+    def unregister_chat(self, chat_id: str):
+        """Unregister a chat from notifications"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM chat_preferences WHERE chat_id = ?", (chat_id,))
+            conn.commit()
+            logger.info(f"Unregistered chat {chat_id} from notifications")
+    
+    def is_chat_registered(self, chat_id: str) -> bool:
+        """Check if a chat is registered for notifications"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 1 FROM chat_preferences 
+                WHERE chat_id = ? AND preference_key = 'registered' AND preference_value = 'true'
+            """, (chat_id,))
+            return cursor.fetchone() is not None
+    
+    def get_all_registered_chats(self) -> List[str]:
+        """Get list of all registered chat IDs"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT chat_id FROM chat_preferences 
+                WHERE preference_key = 'registered' AND preference_value = 'true'
+                ORDER BY created_at
+            """)
+            return [row[0] for row in cursor.fetchall()]

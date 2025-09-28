@@ -124,15 +124,18 @@ You can customize your bot further:
    This bot monitors RSDN.org forum and sends notifications about new messages.
    ```
 
-2. **Set bot commands** (appear in the menu):
+2. **Bot commands** are set automatically when the bot starts, but you can also set them manually:
    ```
    /setcommands
    ```
    Then choose your bot and enter:
    ```
-   start - Show welcome message
-   status - Show bot status
-   stats - Show detailed statistics
+   start - 🚀 Subscribe to notifications
+   stop - 🛑 Unsubscribe from notifications  
+   status - 📊 Show bot status
+   stats - 📈 Message statistics
+   filters - 🔍 Current forum filters
+   reset_filters - 🗑️ Reset all filters
    ```
 
 3. **Set bot photo** (optional):
@@ -162,9 +165,6 @@ You can customize your bot further:
    # Replace with your actual bot token from BotFather
    TELEGRAM_BOT_TOKEN=8358189437:AAE-4JEZHKlFmWRWlDj1YNdPpogycokYPSM
    
-   # Replace with your actual chat ID (number, not username)
-   TELEGRAM_CHAT_ID=123456789
-   
    # How often to check for new messages (in minutes)
    CHECK_INTERVAL_MINUTES=1
    
@@ -178,13 +178,13 @@ You can customize your bot further:
    - Never commit the `.env` file to version control
    - The `.env` file is already ignored in `.gitignore`
 
-### 3. Getting Your Chat ID
+### 3. Using the Bot
 
-To find your Telegram Chat ID:
-1. Start a chat with your bot
-2. Send any message to the bot
-3. Visit: `https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates`
-4. Look for `"chat":{"id":123456789}` in the response
+The bot now supports multiple chats and users! Anyone can use it:
+
+1. **Start the bot**: Send `/start` to register your chat for notifications
+2. **Customize**: Use `/forums` to see available forums and `/block_forum` to filter
+3. **Stop notifications**: Send `/stop` to unregister your chat
 
 ### 4. Running the Bot
 
@@ -205,7 +205,6 @@ The bot will:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `TELEGRAM_BOT_TOKEN` | Your Telegram bot token | *Required* |
-| `TELEGRAM_CHAT_ID` | Your Telegram chat ID | *Required* |
 | `CHECK_INTERVAL_MINUTES` | How often to check for new messages (in minutes) | 1 |
 | `RSDN_URL` | RSDN forum URL | https://rsdn.org/forum/ |
 | `DATABASE_FILE` | SQLite database file path | rsdn_messages.db |
@@ -237,9 +236,17 @@ Common RSDN forums:
 
 Once the bot is running, you can use these commands in Telegram:
 
-- `/start` - Show welcome message and available commands
-- `/status` - Show bot status and basic statistics
-- `/stats` - Show detailed forum statistics
+- `/start` - 🚀 Register your chat for notifications and show welcome message
+- `/stop` - 🛑 Unregister your chat from notifications  
+- `/status` - 📊 Show bot status and basic statistics
+- `/stats` - 📈 Show detailed forum message statistics
+- `/filters` - 🔍 Show your current forum filters
+- `/reset_filters` - 🗑️ Reset all your forum filters
+
+**Interactive Features:**
+- Use the "🚫 Don't show messages from [forum]" buttons under messages to filter forums
+- All commands work independently per chat (personal chats, groups, channels)
+- Each chat maintains its own forum filtering preferences
 
 ## Project Structure
 

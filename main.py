@@ -28,8 +28,8 @@ class RSDNBot:
         # Initialize components
         self.db = DatabaseManager(self.database_file)
         self.scraper = RSDNScraper(self.rsdn_url, db_manager=self.db)
-        self.telegram_notifier = TelegramNotifier(self.bot_token, self.chat_id, self.db)
-        self.telegram_handler = TelegramBotHandler(self.bot_token, self.chat_id, self.db, self.scan_interval_minutes)
+        self.telegram_notifier = TelegramNotifier(self.bot_token, self.db)
+        self.telegram_handler = TelegramBotHandler(self.bot_token, self.db, self.scan_interval_minutes)
         
         # Scheduler for periodic tasks
         self.scheduler = AsyncIOScheduler()
@@ -62,7 +62,6 @@ class RSDNBot:
     def load_config(self):
         """Load configuration from environment variables"""
         self.bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
-        self.chat_id = os.getenv('TELEGRAM_CHAT_ID')
         
         # Get check interval in minutes (convert to seconds for internal use)
         check_interval_minutes = int(os.getenv('CHECK_INTERVAL_MINUTES', '1'))
@@ -85,8 +84,8 @@ class RSDNBot:
         # Validate required configuration
         if not self.bot_token:
             raise ValueError("TELEGRAM_BOT_TOKEN is required")
-        if not self.chat_id:
-            raise ValueError("TELEGRAM_CHAT_ID is required")
+        
+        # Note: TELEGRAM_CHAT_ID is no longer required - users register via /start
         
         self.logger.info("Configuration loaded successfully")
         if self.monitored_forums:
@@ -181,12 +180,18 @@ class RSDNBot:
             # Start Telegram bot handler
             await self.telegram_handler.start_bot()
             
-            # Send startup notification
-            await self.telegram_notifier.send_status_message(
-                "🤖 <b>RSDN Bot запущен!</b>\n\n"
-                f"⏰ Интервал сканирования: {self.scan_interval} секунд\n"
-                f"📂 Отслеживаемые форумы: {'все' if not self.monitored_forums else ', '.join(self.monitored_forums)}"
-            )
+            # Send startup notification to all registered chats
+            registered_chats = self.db.get_all_registered_chats()
+            if registered_chats:
+                await self.telegram_notifier.send_status_message(
+                    "🤖 <b>RSDN Bot запущен!</b>\n\n"
+                    f"⏰ Интервал сканирования: {self.scan_interval_minutes} мин\n"
+                    f"📂 Отслеживаемые форумы: {'все' if not self.monitored_forums else ', '.join(self.monitored_forums)}\n"
+                    f"👥 Зарегистрированных чатов: {len(registered_chats)}"
+                )
+                self.logger.info(f"Sent startup notification to {len(registered_chats)} chats")
+            else:
+                self.logger.info("No registered chats found - use /start to register for notifications")
             
             # Setup and start scheduler
             self.setup_scheduler()

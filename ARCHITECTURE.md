@@ -1,7 +1,9 @@
 # RSDN Forum Monitor Bot - Architecture & Design Document
 
 ## Project Overview
-A Telegram bot that monitors the RSDN (Russian Software Developer Network) forum for new messages and sends real-time notifications. Deployed on Azure App Service F1 (free tier) with traffic optimization achieving 98% bandwidth reduction.
+A multi-user Telegram bot that monitors the RSDN (Russian Software Developer Network) forum for new messages and sends real-time notifications to registered chats. Deployed on Azure App Service F1 (free tier) with traffic optimization achieving 98% bandwidth reduction.
+
+**Key Features**: Multi-chat support, per-chat forum filtering, dynamic user registration via `/start` command.
 
 ## Architecture Components
 
@@ -13,11 +15,12 @@ A Telegram bot that monitors the RSDN (Russian Software Developer Network) forum
 5. **app.py** - Flask wrapper for Azure App Service compatibility
 
 ### Key Features
+- **Multi-chat support** - Any user/group/channel can register with `/start`
+- **Per-chat forum filtering** - Independent preferences for each registered chat
 - **Real-time monitoring** of RSDN forum mainlist
 - **Smart traffic optimization** with caching (98% bandwidth reduction)
 - **Message deduplication** using real RSDN message IDs
 - **User-friendly Telegram interface** with inline buttons
-- **Forum filtering** - users can block specific forums
 - **Content preview** extraction from messages
 - **Zero-reply message support** (fixed critical parsing issue)
 
@@ -31,7 +34,7 @@ A Telegram bot that monitors the RSDN (Russian Software Developer Network) forum
 
 ### Data Flow
 ```
-RSDN Forum -> Scraper -> Database Cache -> Telegram Bot -> Users
+RSDN Forum -> Scraper -> Database Cache -> Telegram Bot -> All Registered Chats
 ```
 
 ### Traffic Optimization Strategy
@@ -46,7 +49,7 @@ RSDN Forum -> Scraper -> Database Cache -> Telegram Bot -> Users
 3. **Filter recent messages** (posted within minutes using "мин" detection)
 4. **Extract message IDs** from subject links (not time links - critical fix)
 5. **Fetch content** for new messages with caching
-6. **Send notifications** via Telegram with user filtering
+6. **Send notifications** to all registered chats with per-chat forum filtering
 
 ### Recent Message Detection ("мин" Filtering)
 **Core Logic**: Only process messages posted within minutes (not hours/days)
@@ -130,6 +133,33 @@ if thread_id and latest_message_id:
 - Users expect to see both new topics AND replies to existing topics
 - Different presentation makes sense: new topics show original author, replies show latest contributor
 
+### 6. Multi-Chat Architecture Conversion
+**Major Enhancement**: Converted from single-user to multi-chat bot
+
+**Database Schema Migration**:
+- Renamed `user_preferences` table to `chat_preferences`
+- Changed `user_id` column to `chat_id` to properly separate forum usernames from Telegram chat IDs
+- All database methods updated from `get_user_*` to `get_chat_*` pattern
+
+**Registration System**:
+```python
+# Users register their chats dynamically
+@self.application.add_handler(CommandHandler("start", self.start_command))
+@self.application.add_handler(CommandHandler("stop", self.stop_command))
+
+# Notifications sent to all registered chats
+registered_chats = self.db_manager.get_all_registered_chats()
+for chat_id in registered_chats:
+    # Send notification with per-chat forum filtering
+```
+
+**Benefits**:
+- No hardcoded `TELEGRAM_CHAT_ID` configuration required
+- Anyone can use the bot by sending `/start`
+- Each chat maintains independent forum filtering preferences
+- Supports personal chats, group chats, and channels
+- Scalable to unlimited users without configuration changes
+
 ### 4. Author Attribution Logic
 **Fix**: Show original author for messages without replies
 ```python
@@ -144,7 +174,6 @@ author=last_reply_author if (replies_count > 0 and last_reply_author) else autho
 
 ### Environment Variables
 - `TELEGRAM_BOT_TOKEN` - Bot authentication
-- `TELEGRAM_CHAT_ID` - Target chat for notifications  
 - `RSDN_URL` - Forum base URL (https://rsdn.org)
 - `CHECK_INTERVAL_MINUTES` - Polling frequency (default: 5)
 - `DATABASE_PATH` - SQLite database location
@@ -157,21 +186,30 @@ author=last_reply_author if (replies_count > 0 and last_reply_author) else autho
 ## Database Schema
 
 ### Tables
-1. **messages** - Processed message cache
-2. **user_blocked_forums** - Per-user forum filtering preferences
+1. **seen_messages** - Processed message cache and deduplication
+2. **chat_preferences** - Per-chat settings and forum filtering
 
 ### Key Fields
+**seen_messages table**:
 - `message_id` - Real RSDN message ID (not hash)
 - `last_message_text` - Cached content preview
 - `replies_count` - Thread reply count
 - `time_posted` - Formatted timestamp
 
+**chat_preferences table**:
+- `chat_id` - Telegram chat ID (users, groups, channels)
+- `preference_key` - Setting name (e.g., 'blocked_forum_5')
+- `preference_value` - Setting value
+
 ## Telegram Bot Interface
 
 ### Commands
-- `/start` - Initialize bot and show help
+- `/start` - Register chat for notifications and show help
+- `/stop` - Unregister chat from notifications
 - `/status` - Show bot status and configuration
-- `/forums` - List available forums
+- `/forums` - List available forums with blocking options
+- `/block_forum <id>` - Block specific forum in this chat
+- `/unblock_forum <id>` - Unblock specific forum in this chat
 - `/help` - Display command list
 
 ### Message Format
@@ -246,20 +284,21 @@ git push origin master
 ## Future Enhancement Ideas
 
 ### Potential Improvements
-1. **Multi-user support** with per-user preferences
-2. **Advanced filtering** by keywords, authors, or topics
-3. **Message threading** visualization
-4. **Push notification** alternatives
-5. **Analytics dashboard** for forum activity
-6. **RSS feed** generation
-7. **Mobile app** integration
-8. **Machine learning** for content classification
+1. **Advanced filtering** by keywords, authors, or topics
+2. **Message threading** visualization
+3. **Push notification** alternatives
+4. **Analytics dashboard** for forum activity
+5. **RSS feed** generation
+6. **Mobile app** integration
+7. **Machine learning** for content classification
+8. **User statistics** and usage analytics
 
 ### Scalability Considerations
-- Database migration to PostgreSQL for multi-user
+- Database migration to PostgreSQL for high-volume multi-chat usage
 - Redis for distributed caching
 - Load balancing for high traffic
 - Microservices architecture separation
+- Chat registration rate limiting
 
 ## Technical Decisions Rationale
 
@@ -267,7 +306,8 @@ git push origin master
 - Simple deployment on free tier
 - ACID transactions
 - No additional infrastructure cost
-- Sufficient for single-user bot
+- Sufficient for moderate multi-chat usage
+- Easy migration to PostgreSQL when needed
 
 ### Why Azure F1?
 - Free tier availability
