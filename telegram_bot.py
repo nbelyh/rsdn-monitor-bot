@@ -69,7 +69,7 @@ class TelegramNotifier:
                     line += f"\n  👤 {html.escape(message.author)} • 🕐 {html.escape(message.time_posted)}"
                     line += f" • 💬 {message.replies_count} ответов"
                 else:
-                    line += f"\n  � {html.escape(message.author)} • 🕐 {html.escape(message.time_posted)}"
+                    line += f"\n  👤 {html.escape(message.author)} • 🕐 {html.escape(message.time_posted)}"
                     if message.replies_count > 0:
                         line += f" • 💬 {message.replies_count}"
                 
