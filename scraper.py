@@ -326,17 +326,24 @@ class RSDNScraper:
                         logger.debug(f"Skipping old message: {time_posted}")
                         continue
                     
-                    # Extract real latest message ID from subject link
-                    subject_cell = cells[2]
-                    subject_link = subject_cell.find('a')
-                    latest_message_id = None
-                    if subject_link:
-                        href = subject_link.get('href', '')
-                        match = re.search(r'/forum/[^/]+/(\d+)', href)
-                        if match:
-                            latest_message_id = match.group(1)
+                    # Extract real latest message ID from time link (preferred) or subject link (fallback)
+                    # Time links point to the actual latest message in the thread
+                    latest_message_id = self._extract_latest_message_id_from_time_link(time_cell)
+                    
+                    # If time cell has no link (only span), fall back to subject link
+                    # This happens when there are no replies, so the "latest" message is the original thread starter
                     if not latest_message_id:
-                        logger.debug(f"Could not extract latest message ID from time cell")
+                        subject_cell = cells[2]
+                        subject_link = subject_cell.find('a')
+                        if subject_link:
+                            href = subject_link.get('href', '')
+                            match = re.search(r'/forum/[^/]+/(\d+)', href)
+                            if match:
+                                latest_message_id = match.group(1)
+                                logger.debug(f"Used subject link ID as fallback: {latest_message_id}")
+                    
+                    if not latest_message_id:
+                        logger.debug(f"Could not extract message ID from either time or subject cell")
                         continue
                     
                     # Extract forum
@@ -393,8 +400,11 @@ class RSDNScraper:
                     
                     # Extract thread ID from the subject URL for getting message content
                     thread_id = ""
-                    if url:
-                        thread_match = re.search(r'/forum/[^/]+/(\d+)', url)
+                    subject_cell = cells[2]
+                    subject_link = subject_cell.find('a')
+                    if subject_link:
+                        href = subject_link.get('href', '')
+                        thread_match = re.search(r'/forum/[^/]+/(\d+)', href)
                         if thread_match:
                             thread_id = thread_match.group(1)
                     
