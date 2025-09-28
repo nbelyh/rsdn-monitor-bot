@@ -84,6 +84,12 @@ def run_bot():
     try:
         bot_instance = RSDNBot()
         
+        # Get the configured check interval from environment
+        import os
+        check_interval_minutes = int(os.getenv('CHECK_INTERVAL_MINUTES', '2'))
+        check_interval_seconds = check_interval_minutes * 60
+        logger.info(f"Flask app bot runner configured for {check_interval_minutes} minutes ({check_interval_seconds} seconds)")
+        
         # For Azure App Service, we need to avoid signal handlers in threads
         # Run the bot check directly without the full scheduler
         import asyncio
@@ -99,10 +105,10 @@ def run_bot():
             while True:
                 try:
                     await bot_instance.scan_and_notify()
-                    await asyncio.sleep(60)  # Check every minute
+                    await asyncio.sleep(check_interval_seconds)  # Use configured interval
                 except Exception as e:
                     logger.error(f"Error in periodic check: {e}")
-                    await asyncio.sleep(60)
+                    await asyncio.sleep(check_interval_seconds)  # Use configured interval for retry too
         
         try:
             loop.run_until_complete(periodic_check())
