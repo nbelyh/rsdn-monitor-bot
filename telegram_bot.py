@@ -81,10 +81,10 @@ class TelegramNotifier:
                 if message.last_reply_author and message.replies_count > 0:
                     # Get original author from the title parsing or use a different approach
                     # For now, we'll show the latest reply author as the main author
-                    line += f"\n  👤 {html.escape(message.author)} • 🕐 {html.escape(message.time_posted)}"
+                    line += f"\n  👤 {html.escape(message.author)}"
                     line += f" • 💬 {message.replies_count} ответов"
                 else:
-                    line += f"\n  👤 {html.escape(message.author)} • 🕐 {html.escape(message.time_posted)}"
+                    line += f"\n  👤 {html.escape(message.author)}"
                     if message.replies_count > 0:
                         line += f" • 💬 {message.replies_count}"
                 
