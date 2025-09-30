@@ -13,6 +13,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from database import DatabaseManager, ForumMessage
 from scraper import RSDNScraper
+from rsdn_api_client import RSDNAPIClient
 from telegram_bot import TelegramNotifier, TelegramBotHandler
 
 # Load environment variables
@@ -27,7 +28,20 @@ class RSDNBot:
         
         # Initialize components
         self.db = DatabaseManager(self.database_file)
-        self.scraper = RSDNScraper(self.rsdn_url, db_manager=self.db)
+        
+        # Choose between API client and HTML scraper
+        if self.use_api_client:
+            self.logger.info("Using RSDN SOAP API client")
+            self.scraper = RSDNAPIClient(
+                username=self.rsdn_username,
+                password=self.rsdn_password,
+                base_url=self.rsdn_url,
+                db_manager=self.db
+            )
+        else:
+            self.logger.info("Using HTML scraper (legacy mode)")
+            self.scraper = RSDNScraper(self.rsdn_url, db_manager=self.db)
+        
         self.telegram_notifier = TelegramNotifier(self.bot_token, self.db)
         self.telegram_handler = TelegramBotHandler(self.bot_token, self.db, self.scan_interval_minutes)
         
@@ -63,6 +77,13 @@ class RSDNBot:
         """Load configuration from environment variables"""
         self.bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
         
+        # API client toggle
+        self.use_api_client = os.getenv('USE_API_CLIENT', 'false').lower() == 'true'
+        
+        # RSDN API credentials (required if USE_API_CLIENT=true)
+        self.rsdn_username = os.getenv('RSDN_USERNAME', '')
+        self.rsdn_password = os.getenv('RSDN_PASSWORD', '')
+        
         # Get check interval in minutes (convert to seconds for internal use)
         check_interval_minutes = int(os.getenv('CHECK_INTERVAL_MINUTES', '1'))
         self.scan_interval = check_interval_minutes * 60  # Convert to seconds for scheduler
@@ -84,6 +105,13 @@ class RSDNBot:
         # Validate required configuration
         if not self.bot_token:
             raise ValueError("TELEGRAM_BOT_TOKEN is required")
+        
+        # Validate API credentials if API mode is enabled
+        if self.use_api_client:
+            if not self.rsdn_username or not self.rsdn_password:
+                raise ValueError(
+                    "RSDN_USERNAME and RSDN_PASSWORD are required when USE_API_CLIENT=true"
+                )
         
         # Note: TELEGRAM_CHAT_ID is no longer required - users register via /start
         

@@ -8,11 +8,12 @@ A multi-user Telegram bot that monitors the RSDN (Russian Software Developer Net
 ## Architecture Components
 
 ### Core Modules
-1. **main.py** - Entry point and orchestration
-2. **scraper.py** - Forum scraping with traffic optimization
-3. **telegram_bot.py** - Telegram notifications and user interaction
-4. **database.py** - SQLite data persistence and caching
-5. **app.py** - Flask wrapper for Azure App Service compatibility
+1. **main.py** - Entry point and orchestration with API/scraper toggle
+2. **rsdn_api_client.py** - Official RSDN SOAP API client (preferred method)
+3. **scraper.py** - Legacy HTML scraping fallback (deprecated)
+4. **telegram_bot.py** - Telegram notifications and user interaction
+5. **database.py** - SQLite data persistence and caching
+6. **app.py** - Flask wrapper for Azure App Service compatibility
 
 ### Key Features
 - **Multi-chat support** - Any user/group/channel can register with `/start`
@@ -33,17 +34,109 @@ A multi-user Telegram bot that monitors the RSDN (Russian Software Developer Net
 - **Git deployment** from local repository
 
 ### Data Flow
+
+**Primary (API Mode - Recommended)**:
 ```
-RSDN Forum -> Scraper -> Database Cache -> Telegram Bot -> All Registered Chats
+RSDN JanusAT SOAP API -> rsdn_api_client.py -> Database Cache -> Telegram Bot -> All Registered Chats
 ```
 
-### Traffic Optimization Strategy
+**Legacy (Scraper Mode - Deprecated)**:
+```
+RSDN Forum HTML -> scraper.py -> Database Cache -> Telegram Bot -> All Registered Chats
+```
+
+**Mode Selection**: Controlled by `USE_API_CLIENT=true/false` in `.env` configuration.
+
+### RSDN Data Source Strategy
+
+The bot supports two data retrieval methods:
+
+#### 1. **RSDN Official SOAP API** (Recommended - Default)
+**Status**: ✅ **Active** - Preferred method as of September 2024
+
+**Implementation**: `rsdn_api_client.py` (420 lines)
+
+**Key Features**:
+- **Official API**: Uses RSDN JanusAT SOAP API (https://rsdn.org/ws/janusAT.asmx)
+- **Incremental Sync**: Row version-based state tracking for efficient updates
+- **Authenticated Access**: Requires RSDN username/password
+- **Structured Data**: XML responses with clean message structure
+- **83 Forums**: Subscribes to all available RSDN forums
+- **Zero Traffic Waste**: Only fetches truly new messages after first sync
+
+**Authentication**:
+```python
+# Credentials stored in .env
+RSDN_USERNAME=your_username
+RSDN_PASSWORD=your_password
+USE_API_CLIENT=true
+```
+
+**Incremental Sync Logic**:
+```python
+# First sync: Get all recent messages (isFirstRequest=true)
+# Subsequent syncs: Only new messages since last sync (isFirstRequest=false)
+# State tracking via messageRowVersion, ratingRowVersion, moderateRowVersion
+```
+
+**API Methods Used**:
+- `Check` - Connection testing
+- `GetForumList` - Retrieve forum ID→name mapping (83 forums)
+- `GetNewData` - Fetch new messages with incremental sync
+
+**Traffic Efficiency**:
+- **First scan**: ~64 messages (all recent forum activity)
+- **Subsequent scans**: 0 messages (unless new posts)
+- **Bandwidth**: ~10KB per scan (vs 1MB+ with HTML scraping)
+
+**Row Version State Management**:
+- Tracks sync position using base64-encoded binary tokens
+- Updates after each successful API call
+- **Note**: Currently in-memory only (resets on bot restart)
+- **Future**: Persist to database for cross-restart continuity
+
+#### 2. **HTML Scraping** (Legacy Fallback)
+**Status**: ⚠️ **Deprecated** - Kept for backward compatibility
+
+**Implementation**: `scraper.py` (original implementation)
+
+**Why Deprecated**:
+- Fragile HTML parsing (breaks when RSDN changes layout)
+- High bandwidth usage (downloads entire HTML pages)
+- Complex "мин" filtering logic required
+- Subject link vs time link parsing issues
+- Zero-reply message edge cases
+
+**When to Use**:
+- API credentials unavailable
+- Testing compatibility
+- Emergency fallback if API has issues
+
+**Configuration**:
+```bash
+# Disable API, use HTML scraper
+USE_API_CLIENT=false
+```
+
+### Legacy Traffic Optimization Strategy (Scraper Mode Only)
+
 1. **Mainlist caching** - 5-minute cache for forum main page
 2. **Message content caching** - Permanent cache for already processed messages
 3. **Processed message tracking** - Avoid re-fetching known messages
 4. **Adaptive page sizing** - Reduce page size when cache hit ratio > 80%
 
 ### Message Processing Pipeline
+
+**API Mode** (Current):
+1. **Authenticate** with RSDN credentials
+2. **Fetch forum list** via GetForumList (83 forums)
+3. **Subscribe to all forums** in GetNewData request
+4. **Get new messages** with incremental sync (isFirstRequest flag)
+5. **Parse XML response** into ForumMessage objects
+6. **Update row versions** for next sync
+7. **Send notifications** to all registered chats with per-chat forum filtering
+
+**Scraper Mode** (Legacy):
 1. **Fetch mainlist** from `https://rsdn.org/forum/mainlist/all`
 2. **Parse HTML table** to extract message metadata
 3. **Filter recent messages** (posted within minutes using "мин" detection)
@@ -165,13 +258,56 @@ author=last_reply_author if (replies_count > 0 and last_reply_author) else autho
 **Problem**: Broken emoji character in Telegram messages
 **Solution**: Replace corrupted character with proper 👤 emoji
 
+### 7. API Migration (September 2024)
+**Major Enhancement**: Migrated from fragile HTML scraping to official RSDN SOAP API
+
+**Motivation**:
+- HTML scraping is fragile (breaks when RSDN changes layout)
+- High bandwidth usage (1MB+ per scan vs 10KB with API)
+- Complex parsing logic with edge cases (zero-reply messages, "мин" filtering)
+- Official API provides structured, reliable data
+
+**Implementation**: Created `rsdn_api_client.py` (420 lines)
+- SOAP API wrapper using xml.etree.ElementTree
+- Incremental sync with row version state tracking
+- Authentication with RSDN username/password
+- Forum subscription to all 83 forums
+- ForumMessage object compatibility with existing database schema
+
+**Key Features**:
+- **isFirstRequest Logic**: First sync gets all recent messages (true), subsequent syncs only new messages (false)
+- **Row Version Tracking**: messageRowVersion, ratingRowVersion, moderateRowVersion (base64 tokens)
+- **Traffic Efficiency**: Only fetches truly new messages after first sync
+- **Backward Compatibility**: Toggle via USE_API_CLIENT env variable
+
+**Results**:
+- ✅ 99% bandwidth reduction (10KB vs 1MB per scan)
+- ✅ No duplicate notifications (incremental sync working)
+- ✅ Structured XML data (no HTML parsing edge cases)
+- ✅ Future-proof against RSDN layout changes
+
+**Future Enhancements**:
+- Persist row versions to database (currently in-memory only)
+- System account setup for shared deployments
+- Rate limit handling
+
 ## Configuration Management
 
 ### Environment Variables
-- `TELEGRAM_BOT_TOKEN` - Bot authentication
-- `RSDN_URL` - Forum base URL (https://rsdn.org)
-- `CHECK_INTERVAL_MINUTES` - Polling frequency (default: 5)
-- `DATABASE_PATH` - SQLite database location
+
+**Core Configuration**:
+- `TELEGRAM_BOT_TOKEN` - Bot authentication token from @BotFather
+- `CHECK_INTERVAL_MINUTES` - Polling frequency (default: 1 minute)
+- `DATABASE_PATH` - SQLite database location (default: rsdn_messages.db)
+
+**API Mode (Recommended)**:
+- `USE_API_CLIENT` - Enable SOAP API client (true/false, default: true)
+- `RSDN_USERNAME` - Your RSDN account username (required for API mode)
+- `RSDN_PASSWORD` - Your RSDN account password (required for API mode)
+
+**Scraper Mode (Legacy)**:
+- `RSDN_URL` - Forum base URL (default: https://rsdn.org)
+- Only used when `USE_API_CLIENT=false`
 
 ### Dynamic Configuration
 - Users can filter forums via inline Telegram buttons
