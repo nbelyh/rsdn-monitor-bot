@@ -7,6 +7,7 @@ This project has comprehensive documentation in several .md files:
 - **TELEGRAM_SETUP.md** - Telegram bot configuration and API setup guide
 - **DATABASE_SCHEMA.md** - SQLite database structure and table definitions
 - **AZURE_CONFIG.md** - Azure App Service deployment configuration and settings
+- **MIGRATIONS.md** - Database migration system and how to add new migrations
 
 Reference these files for detailed context on specific aspects of the system.
 
@@ -16,10 +17,11 @@ This is a **multi-user Telegram bot** that monitors RSDN.org forum for new messa
 **Core Data Flow**: `RSDN Forum → scraper.py → database.py → telegram_bot.py → All Registered Chats`
 
 ### Critical Components
-- **main.py** - Orchestrates with AsyncIOScheduler, loads env config
+- **main.py** - Orchestrates with AsyncIOScheduler, loads env config, runs migrations on startup
 - **scraper.py** - Parses RSDN mainlist HTML with traffic optimization (98% bandwidth reduction)
 - **telegram_bot.py** - Handles multi-chat registration and per-chat forum filtering 
 - **database.py** - SQLite with two main tables: `seen_messages` and `chat_preferences`
+- **migrations.py** - Database schema migration system with version tracking
 - **app.py** - Flask wrapper for Azure App Service deployment
 
 ## Key Implementation Patterns
@@ -121,9 +123,12 @@ subject_link = cells[2].find('a')  # Critical: get message ID from here
 - Format: `👤 author • 🕐 time • 💬 replies`
 
 ### Database Migrations
-- Modify `init_database()` in `database.py`
-- Handle both fresh installs and existing databases
-- Test with both empty and populated databases
+- Add new migration in `migrations.py` using `MigrationManager.get_migrations()`
+- Migrations run automatically on startup (both local and Azure)
+- Use version numbers sequentially (1, 2, 3...)
+- Always backup data before destructive operations
+- Test locally with `python migrations.py` before deploying
+- See **MIGRATIONS.md** for detailed guide on adding migrations
 
 ### Forum Filtering Logic
 - User blocks via inline buttons → stored as `chat_preferences`

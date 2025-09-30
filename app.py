@@ -14,6 +14,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from main import RSDNBot
+from migrations import run_migrations
 
 # Configure logging for Azure
 logging.basicConfig(
@@ -133,6 +134,15 @@ def start_bot_thread():
 
 # Auto-start bot when the module is imported
 if __name__ == '__main__' or os.environ.get('WEBSITE_SITE_NAME'):
+    # Run migrations first on Azure startup
+    logger.info("Running database migrations on startup...")
+    db_path = os.getenv('DATABASE_FILE', 'rsdn_messages.db')
+    try:
+        run_migrations(db_path)
+        logger.info("Migrations completed successfully")
+    except Exception as e:
+        logger.error(f"Migration error: {e}")
+    
     # Running on Azure or directly
     start_bot_thread()
 

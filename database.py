@@ -73,7 +73,7 @@ class DatabaseManager:
                     preference_value TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (chat_id, preference_key)
+                    PRIMARY KEY (chat_id, preference_key, preference_value)
                 )
             """)
             
@@ -230,7 +230,7 @@ class DatabaseManager:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT OR REPLACE INTO chat_preferences 
+                INSERT OR IGNORE INTO chat_preferences 
                 (chat_id, preference_key, preference_value, updated_at)
                 VALUES (?, 'blocked_forum', ?, CURRENT_TIMESTAMP)
             """, (chat_id, forum))

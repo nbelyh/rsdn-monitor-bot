@@ -15,6 +15,7 @@ from database import DatabaseManager, ForumMessage
 from scraper import RSDNScraper
 from rsdn_api_client import RSDNAPIClient
 from telegram_bot import TelegramNotifier, TelegramBotHandler
+from migrations import run_migrations
 
 # Load environment variables
 load_dotenv()
@@ -25,6 +26,10 @@ class RSDNBot:
     def __init__(self):
         self.setup_logging()
         self.load_config()
+        
+        # Run database migrations before initializing components
+        self.logger.info("Checking for database migrations...")
+        run_migrations(self.database_file)
         
         # Initialize components
         self.db = DatabaseManager(self.database_file)
