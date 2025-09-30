@@ -10,6 +10,8 @@ def clean_message_text(text: str, max_length: int = 200) -> str:
     """
     Clean message text by removing HTML, quotes, and greetings.
     
+    Strategy: Skip all quote blocks at the beginning, then take the first real content.
+    
     Args:
         text: Raw message text (may contain HTML)
         max_length: Maximum length (default: 200)
@@ -24,32 +26,34 @@ def clean_message_text(text: str, max_length: int = 200) -> str:
     text = re.sub(r'<[^>]+>', '', text)
     text = html.unescape(text)
     
-    # Filter lines: skip greetings and quotes
-    lines = [line.strip() for line in text.split('\n')]
-    clean_lines = []
+    # Split into lines
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
     
-    skip_next = False
-    for line in lines:
-        if skip_next:
-            skip_next = False
-            continue
+    # Find where actual content starts (skip all quotes/greetings at the beginning)
+    content_start_idx = None
+    for i, line in enumerate(lines):
+        # Skip if it's a greeting or quote marker
+        is_quote = (line.startswith('>') or 
+                   re.match(r'^[\w.]+>>', line) or  # Match wl.>> style (with dot)
+                   re.match(r'^[\w.]+>', line) or   # Match O>, M>, wl.> style
+                   'Здравствуйте,' in line or
+                   'писали:' in line)
         
-        # Skip greeting + next line (usually a quote)
-        if 'Здравствуйте,' in line and 'писали:' in line:
-            skip_next = True
-            continue
-        
-        # Keep lines that are: long enough, not quotes, not greetings
-        if (len(line) > 10 and 
-            not line.startswith('>') and
-            not re.match(r'^\w+>', line) and
-            'писали:' not in line):
-            clean_lines.append(line)
+        # Found first line that's actual content
+        if not is_quote and len(line) > 10:
+            content_start_idx = i
+            break
+    
+    # If we found content, take from there to end
+    if content_start_idx is not None:
+        clean_lines = lines[content_start_idx:]
+    else:
+        # No content found, return empty
+        return ""
     
     # Join and cleanup
-    text = ' '.join(clean_lines) if clean_lines else text
+    text = ' '.join(clean_lines)
     text = ' '.join(text.split())  # Remove extra whitespace
-    text = re.sub(r'Здравствуйте,\s+\w+,\s+Вы\s+писали:', '', text).strip()
     
     # Truncate at word boundary
     if max_length and len(text) > max_length:
