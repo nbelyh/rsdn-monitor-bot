@@ -3,6 +3,7 @@ import logging
 from bs4 import BeautifulSoup
 from typing import List, Optional, Set, Dict
 from database import ForumMessage
+from text_cleaner import clean_html_element
 import re
 import hashlib
 from datetime import datetime, timedelta
@@ -116,71 +117,10 @@ class RSDNScraper:
                 # Get the last message (latest reply)
                 latest_msg_body = msg_bodies[-1]
                 
-                # Extract text content, but skip quoted parts
-                text_parts = []
-                
-                # Get all text nodes, but filter out quotes
-                for element in latest_msg_body.find_all(string=True):
-                    text = element.strip()
-                    parent = element.parent
-                    
-                    # Skip quotes (they are in spans with class containing "Quote")
-                    if parent and parent.get('class'):
-                        parent_classes = ' '.join(parent.get('class', []))
-                        if 'quote' in parent_classes.lower() or 'lineQuote' in parent_classes:
-                            continue
-                    
-                    # Skip greeting patterns and quoted text markers
-                    if (len(text) > 5 and 
-                        not text.startswith('Здравствуйте,') and
-                        not text.startswith('>') and
-                        not re.match(r'^\w+>', text) and
-                        'писали:' not in text):
-                        text_parts.append(text)
-                
-                if text_parts:
-                    # Join the text parts and clean up
-                    content = ' '.join(text_parts).strip()
-                    # Remove multiple spaces and clean formatting
-                    content = re.sub(r'\s+', ' ', content)
-                    
-                    # Remove common greeting patterns if they slipped through
-                    content = re.sub(r'Здравствуйте,\s+\w+,\s+Вы\s+писали:', '', content).strip()
-                
-                # If no clean content found, fall back to the entire text but clean it
-                if not content:
-                    full_text = latest_msg_body.get_text(strip=True)
-                    # Split by lines and take non-quoted parts
-                    lines = [line.strip() for line in full_text.split('\n')]
-                    clean_lines = []
-                    
-                    skip_next = False
-                    for line in lines:
-                        if skip_next:
-                            skip_next = False
-                            continue
-                        
-                        if ('Здравствуйте,' in line and 'писали:' in line):
-                            skip_next = True  # Skip the next line too (usually the quote)
-                            continue
-                        
-                        if (len(line) > 10 and 
-                            not line.startswith('>') and
-                            not re.match(r'^\w+>', line) and
-                            not line.startswith('M>') and
-                            not line.startswith('_>')):
-                            clean_lines.append(line)
-                    
-                    if clean_lines:
-                        # Take the most substantial line
-                        content = max(clean_lines, key=len) if clean_lines else None
+                # Clean text from HTML element
+                content = clean_html_element(latest_msg_body, max_length=200)
             
             if content and len(content) > 10:
-                # Final cleanup and truncation
-                content = re.sub(r'\s+', ' ', content).strip()
-                if len(content) > 200:
-                    content = content[:200].rsplit(' ', 1)[0] + "..."
-                
                 # Cache the content
                 self._content_cache[latest_msg_id] = (content, current_time)
                 # Mark as processed

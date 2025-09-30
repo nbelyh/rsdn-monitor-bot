@@ -12,6 +12,7 @@ import base64
 
 # Import ForumMessage from database module
 from database import ForumMessage
+from text_cleaner import clean_message_text
 
 logger = logging.getLogger(__name__)
 
@@ -384,25 +385,7 @@ class RSDNAPIClient:
     
     def _clean_message_content(self, text: str) -> str:
         """Clean and truncate message content"""
-        if not text:
-            return ""
-        
-        # Simple HTML tag removal (basic)
-        import re
-        text = re.sub(r'<[^>]+>', '', text)
-        
-        # Decode HTML entities
-        import html
-        text = html.unescape(text)
-        
-        # Remove excessive whitespace
-        text = ' '.join(text.split())
-        
-        # Truncate to 200 chars
-        if len(text) > 200:
-            text = text[:200].rsplit(' ', 1)[0] + "..."
-        
-        return text.strip()
+        return clean_message_text(text, max_length=200)
     
     def scrape_messages(self, max_pages: int = 1, page_size: int = 50) -> List[ForumMessage]:
         """
