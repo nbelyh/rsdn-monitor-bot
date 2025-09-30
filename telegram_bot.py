@@ -76,10 +76,10 @@ class TelegramNotifier:
             message_lines = []
             for message in messages[:8]:  # Limit to 8 messages to keep it clean
                 # Format: Author inline before title (compact and clean)
-                # • 👤 Author: Title
+                # • 👤 Author: Title (both bold)
                 #   URL
                 #   "Preview"
-                line = f"• 👤 <b>{html.escape(message.author)}</b>: {html.escape(message.title)}"
+                line = f"• 👤 <b>{html.escape(message.author)}: {html.escape(message.title)}</b>"
                 
                 # Add reply count if present
                 if message.replies_count > 0:
