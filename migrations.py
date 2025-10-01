@@ -119,6 +119,9 @@ class MigrationManager:
             (1, "fix_chat_preferences_pk", 
              self._migration_001_fix_chat_preferences,
              "Fix PRIMARY KEY to allow multiple blocked forums per chat"),
+            (2, "normalize_forum_names",
+             self._migration_002_normalize_forum_names,
+             "Convert ID-based forum names to human-readable names"),
         ]
     
     # ==================== Individual Migration Functions ====================
@@ -188,6 +191,103 @@ class MigrationManager:
             """, existing_data)
         
         logger.info("   ✅ Schema migration completed")
+    
+    def _migration_002_normalize_forum_names(self, conn: sqlite3.Connection):
+        """
+        Migration 002: Normalize forum names
+        Converts ID-based forum names (e.g., 'flame.politics.unfiltered') 
+        to human-readable names (e.g., 'Политика (unfiltered)') based on
+        production database analysis and RSDN API forum list.
+        """
+        cursor = conn.cursor()
+        
+        # Mapping based on production database analysis
+        # These map URL-based forum IDs to human-readable Russian names from API
+        FORUM_ID_TO_NAME = {
+            'abroad': 'Заграница',
+            'ai': 'Искусственный интеллект',
+            'auto': 'АвтоМотоВело',
+            'blockchain': 'Blockchain-технологии',
+            'education': 'Образование и наука',
+            'flame.comp': 'Компьютерные священные войны',
+            'flame.politics': 'Политика',
+            'flame.politics.unfiltered': 'Политика (unfiltered)',
+            'hardware': 'Железо',
+            'humour': 'Коллеги, улыбнитесь',
+            'job': 'О работе',
+            'life': 'О жизни',
+            'philosophy': 'Философия программирования',
+            'rsdn': 'Обсуждение сайта',
+            'shareware': 'Shareware и бизнес',
+        }
+        
+        # Get all current forums from database
+        cursor.execute("SELECT DISTINCT forum FROM seen_messages")
+        existing_forums = [row[0] for row in cursor.fetchall()]
+        
+        forums_to_fix = {old: new for old, new in FORUM_ID_TO_NAME.items() 
+                         if old in existing_forums}
+        
+        if not forums_to_fix:
+            logger.info("   No ID-based forum names found to normalize")
+            return
+        
+        logger.info(f"   🔧 Normalizing {len(forums_to_fix)} forum names...")
+        
+        for old_name, new_name in forums_to_fix.items():
+            logger.info(f"      '{old_name}' → '{new_name}'")
+            
+            # Update seen_messages
+            cursor.execute("""
+                UPDATE seen_messages 
+                SET forum = ? 
+                WHERE forum = ?
+            """, (new_name, old_name))
+            msg_count = cursor.rowcount
+            
+            # For chat_preferences, handle potential duplicates
+            cursor.execute("""
+                SELECT DISTINCT chat_id 
+                FROM chat_preferences 
+                WHERE preference_key = 'blocked_forum' AND preference_value = ?
+            """, (old_name,))
+            
+            chats_with_old = [row[0] for row in cursor.fetchall()]
+            pref_updated = 0
+            pref_deleted = 0
+            
+            for chat_id in chats_with_old:
+                # Check if this chat already has the new name blocked
+                cursor.execute("""
+                    SELECT 1 
+                    FROM chat_preferences 
+                    WHERE chat_id = ? AND preference_key = 'blocked_forum' AND preference_value = ?
+                """, (chat_id, new_name))
+                
+                if cursor.fetchone():
+                    # Duplicate exists - just delete the old one
+                    cursor.execute("""
+                        DELETE FROM chat_preferences 
+                        WHERE chat_id = ? AND preference_key = 'blocked_forum' AND preference_value = ?
+                    """, (chat_id, old_name))
+                    pref_deleted += 1
+                else:
+                    # No duplicate - safe to update
+                    cursor.execute("""
+                        UPDATE chat_preferences 
+                        SET preference_value = ? 
+                        WHERE chat_id = ? AND preference_key = 'blocked_forum' AND preference_value = ?
+                    """, (new_name, chat_id, old_name))
+                    pref_updated += 1
+            
+            if pref_deleted > 0:
+                logger.info(f"      ✅ {msg_count} messages, {pref_updated} prefs updated, {pref_deleted} dupes removed")
+            elif pref_updated > 0:
+                logger.info(f"      ✅ {msg_count} messages, {pref_updated} preferences updated")
+            else:
+                logger.info(f"      ✅ {msg_count} messages updated")
+        
+        logger.info("   ✅ Forum name normalization completed")
 
 
 def run_migrations(db_path: str, timeout: float):
