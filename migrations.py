@@ -207,4 +207,4 @@ if __name__ == '__main__':
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
-    run_migrations()
+    run_migrations('rsdn_messages.db', timeout=5.0)

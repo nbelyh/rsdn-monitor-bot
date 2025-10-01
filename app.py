@@ -137,8 +137,9 @@ if __name__ == '__main__' or os.environ.get('WEBSITE_SITE_NAME'):
     # Run migrations first on Azure startup
     logger.info("Running database migrations on startup...")
     db_path = os.getenv('DATABASE_FILE', 'rsdn_messages.db')
+    db_timeout = float(os.getenv('DATABASE_TIMEOUT', '5.0'))
     try:
-        run_migrations(db_path)
+        run_migrations(db_path, timeout=db_timeout)
         logger.info("Migrations completed successfully")
     except Exception as e:
         logger.error(f"Migration error: {e}")
