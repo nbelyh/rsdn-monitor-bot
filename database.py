@@ -31,9 +31,17 @@ class ForumMessage:
 class DatabaseManager:
     """Manages SQLite database for storing seen messages"""
     
-    def __init__(self, db_path: str, timeout: float):
+    def __init__(self, db_path: str, timeout: float, auto_migrate: bool = True):
         self.db_path = Path(db_path)
         self.timeout = timeout
+        
+        # Run migrations first if enabled (before init_database to handle schema changes)
+        if auto_migrate:
+            from migrations import MigrationManager
+            migration_manager = MigrationManager(str(self.db_path), self.timeout)
+            migration_manager.run_all_migrations()
+        
+        # Then initialize/create any missing tables
         self.init_database()
     
     def _connect(self):
@@ -325,3 +333,57 @@ class DatabaseManager:
                 WHERE preference_key = 'registered' AND preference_value = 'true'
             """)
             return cursor.fetchone()[0]
+    
+    def increment_failed_deliveries(self, chat_id: str) -> int:
+        """Increment failed delivery count for a chat and return the new count"""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            
+            # Get current count
+            cursor.execute("""
+                SELECT preference_value FROM chat_preferences 
+                WHERE chat_id = ? AND preference_key = 'failed_deliveries'
+            """, (chat_id,))
+            
+            result = cursor.fetchone()
+            current_count = int(result[0]) if result else 0
+            new_count = current_count + 1
+            
+            # Delete old count if exists (needed because primary key includes preference_value)
+            cursor.execute("""
+                DELETE FROM chat_preferences 
+                WHERE chat_id = ? AND preference_key = 'failed_deliveries'
+            """, (chat_id,))
+            
+            # Insert new count
+            cursor.execute("""
+                INSERT INTO chat_preferences 
+                (chat_id, preference_key, preference_value, updated_at)
+                VALUES (?, 'failed_deliveries', ?, CURRENT_TIMESTAMP)
+            """, (chat_id, str(new_count)))
+            
+            conn.commit()
+            logger.warning(f"Failed delivery count for chat {chat_id}: {new_count}")
+            return new_count
+    
+    def reset_failed_deliveries(self, chat_id: str):
+        """Reset failed delivery count for a chat after successful delivery"""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM chat_preferences 
+                WHERE chat_id = ? AND preference_key = 'failed_deliveries'
+            """, (chat_id,))
+            conn.commit()
+    
+    def get_failed_deliveries_count(self, chat_id: str) -> int:
+        """Get the failed delivery count for a chat"""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT preference_value FROM chat_preferences 
+                WHERE chat_id = ? AND preference_key = 'failed_deliveries'
+            """, (chat_id,))
+            
+            result = cursor.fetchone()
+            return int(result[0]) if result else 0

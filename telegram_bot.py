@@ -3,6 +3,7 @@ from typing import List, Optional, Set
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.constants import ParseMode
+from telegram.error import Forbidden, TelegramError
 import html
 
 logger = logging.getLogger(__name__)
@@ -106,8 +107,23 @@ class TelegramNotifier:
                 disable_web_page_preview=True
             )
             
+            # Reset failed delivery count on successful send
+            if self.db:
+                self.db.reset_failed_deliveries(chat_id)
+            
+        except Forbidden as e:
+            # Bot was blocked by the user
+            logger.warning(f"Bot blocked by user in chat {chat_id}: {e}")
+            if self.db:
+                failed_count = self.db.increment_failed_deliveries(chat_id)
+                if failed_count >= 5:
+                    logger.info(f"Unregistering chat {chat_id} after {failed_count} failed delivery attempts")
+                    self.db.unregister_chat(chat_id)
+        except TelegramError as e:
+            # Other Telegram-specific errors (network issues, etc.)
+            logger.error(f"Telegram error sending notification to chat {chat_id}: {e}")
         except Exception as e:
-            logger.error(f"Error sending forum messages notification: {e}")
+            logger.error(f"Error sending forum messages notification to chat {chat_id}: {e}")
     
     async def send_status_message(self, text: str, chat_id: str = None):
         """Send a status message to a specific chat or all registered chats"""
@@ -130,6 +146,12 @@ class TelegramNotifier:
                                 text=text,
                                 parse_mode=ParseMode.HTML
                             )
+                        except Forbidden as e:
+                            logger.warning(f"Bot blocked by user in chat {cid}: {e}")
+                            failed_count = self.db.increment_failed_deliveries(cid)
+                            if failed_count >= 5:
+                                logger.info(f"Unregistering chat {cid} after {failed_count} failed delivery attempts")
+                                self.db.unregister_chat(cid)
                         except Exception as e:
                             logger.error(f"Error sending status message to chat {cid}: {e}")
         except Exception as e:
@@ -161,6 +183,9 @@ class TelegramBotHandler:
         
         # Register the chat for notifications
         self.db.register_chat(chat_id, chat_title)
+        
+        # Reset failed delivery count when user re-activates the bot
+        self.db.reset_failed_deliveries(chat_id)
         
         # Format interval display in Russian
         if self.scan_interval_minutes == 1:
