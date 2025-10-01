@@ -295,6 +295,15 @@ class TelegramBotHandler:
             logger.error(f"Error in stats command: {e}")
             await update.message.reply_text("❌ Ошибка при получении статистики")
     
+    def _create_forum_index_map(self, forums: List[str]) -> dict:
+        """Create a mapping of short indices to forum names for callback data"""
+        # Sort forums to ensure consistent ordering
+        sorted_forums = sorted(forums)
+        # Create bidirectional mapping
+        index_to_forum = {i: forum for i, forum in enumerate(sorted_forums)}
+        forum_to_index = {forum: i for i, forum in enumerate(sorted_forums)}
+        return {'index_to_forum': index_to_forum, 'forum_to_index': forum_to_index}
+    
     async def filters_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /filters command - show interactive forum filter menu"""
         try:
@@ -313,6 +322,14 @@ class TelegramBotHandler:
                 )
                 return
             
+            # Create forum index mapping for short callback data
+            forum_map = self._create_forum_index_map(list(all_forums))
+            
+            # Store mapping in context for callback handling
+            if not hasattr(context.bot_data, 'forum_maps'):
+                context.bot_data['forum_maps'] = {}
+            context.bot_data['forum_maps'][chat_id] = forum_map
+            
             # Create header text
             header_text = f"📋 <b>Фильтры форумов</b> ({len(blocked_forums)} заблокировано из {len(all_forums)})\n\n"
             if blocked_forums:
@@ -320,17 +337,17 @@ class TelegramBotHandler:
             else:
                 header_text += "Выберите форумы для блокировки:\n"
             
-            # Create inline keyboard with forums (show max 10 per page)
+            # Create inline keyboard with forums using short indices
             keyboard = []
-            for forum in sorted(all_forums):
+            for idx, forum in forum_map['index_to_forum'].items():
                 if forum in blocked_forums:
                     # Show as blocked with ✅ to unblock
                     button_text = f"🚫 {forum}"
-                    callback_data = f"unblock_forum:{forum}"
+                    callback_data = f"uf:{idx}"  # unblock forum by index
                 else:
                     # Show as allowed with ❌ to block
                     button_text = f"✅ {forum}"
-                    callback_data = f"block_forum:{forum}"
+                    callback_data = f"bf:{idx}"  # block forum by index
                 
                 keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
             
@@ -354,34 +371,44 @@ class TelegramBotHandler:
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle inline button callbacks"""
         query = update.callback_query
-        await query.answer()
         
         try:
             chat_id = str(query.from_user.id)
             callback_data = query.data
             
-            if callback_data.startswith('block_forum:'):
-                forum = callback_data.replace('block_forum:', '')
-                self.db.block_forum_for_chat(chat_id, forum)
-                await query.answer(f"🚫 Форум {forum} заблокирован", show_alert=True)
+            # Get forum mapping from context
+            forum_map = context.bot_data.get('forum_maps', {}).get(chat_id)
+            
+            if callback_data.startswith('bf:'):  # block forum
+                idx = int(callback_data.replace('bf:', ''))
+                if forum_map and idx in forum_map['index_to_forum']:
+                    forum = forum_map['index_to_forum'][idx]
+                    self.db.block_forum_for_chat(chat_id, forum)
+                    await query.answer(f"🚫 Форум {forum} заблокирован", show_alert=True)
+                    
+                    # Refresh the filters menu
+                    await self._refresh_filters_menu(query, context)
+                else:
+                    await query.answer("❌ Ошибка: форум не найден", show_alert=True)
                 
-                # Refresh the filters menu
-                await self._refresh_filters_menu(query)
-                
-            elif callback_data.startswith('unblock_forum:'):
-                forum = callback_data.replace('unblock_forum:', '')
-                self.db.unblock_forum_for_chat(chat_id, forum)
-                await query.answer(f"✅ Форум {forum} разблокирован", show_alert=True)
-                
-                # Refresh the filters menu
-                await self._refresh_filters_menu(query)
+            elif callback_data.startswith('uf:'):  # unblock forum
+                idx = int(callback_data.replace('uf:', ''))
+                if forum_map and idx in forum_map['index_to_forum']:
+                    forum = forum_map['index_to_forum'][idx]
+                    self.db.unblock_forum_for_chat(chat_id, forum)
+                    await query.answer(f"✅ Форум {forum} разблокирован", show_alert=True)
+                    
+                    # Refresh the filters menu
+                    await self._refresh_filters_menu(query, context)
+                else:
+                    await query.answer("❌ Ошибка: форум не найден", show_alert=True)
                 
             elif callback_data == 'reset_all_filters':
                 deleted_count = self.db.reset_chat_forum_filters(chat_id)
                 await query.answer(f"🗑️ Сброшено {deleted_count} фильтров", show_alert=True)
                 
                 # Refresh the filters menu
-                await self._refresh_filters_menu(query)
+                await self._refresh_filters_menu(query, context)
                 
 
                 
@@ -389,7 +416,7 @@ class TelegramBotHandler:
             logger.error(f"Error handling button callback: {e}")
             await query.answer("❌ Ошибка при обработке команды", show_alert=True)
     
-    async def _refresh_filters_menu(self, query):
+    async def _refresh_filters_menu(self, query, context: ContextTypes.DEFAULT_TYPE):
         """Refresh the filters menu after a change"""
         try:
             chat_id = str(query.from_user.id)
@@ -398,6 +425,14 @@ class TelegramBotHandler:
             all_forums = self.db.get_all_forums()
             blocked_forums = self.db.get_chat_blocked_forums(chat_id)
             
+            # Get or create forum mapping
+            if chat_id not in context.bot_data.get('forum_maps', {}):
+                if 'forum_maps' not in context.bot_data:
+                    context.bot_data['forum_maps'] = {}
+                context.bot_data['forum_maps'][chat_id] = self._create_forum_index_map(list(all_forums))
+            
+            forum_map = context.bot_data['forum_maps'][chat_id]
+            
             # Create updated header text
             header_text = f"📋 <b>Фильтры форумов</b> ({len(blocked_forums)} заблокировано из {len(all_forums)})\n\n"
             if blocked_forums:
@@ -405,15 +440,15 @@ class TelegramBotHandler:
             else:
                 header_text += "Выберите форумы для блокировки:\n"
             
-            # Create updated keyboard
+            # Create updated keyboard using short indices
             keyboard = []
-            for forum in sorted(all_forums):
+            for idx, forum in forum_map['index_to_forum'].items():
                 if forum in blocked_forums:
                     button_text = f"🚫 {forum}"
-                    callback_data = f"unblock_forum:{forum}"
+                    callback_data = f"uf:{idx}"
                 else:
                     button_text = f"✅ {forum}"
-                    callback_data = f"block_forum:{forum}"
+                    callback_data = f"bf:{idx}"
                 
                 keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
             
