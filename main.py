@@ -29,10 +29,10 @@ class RSDNBot:
         
         # Run database migrations before initializing components
         self.logger.info("Checking for database migrations...")
-        run_migrations(self.database_file)
+        run_migrations(self.database_file, timeout=self.database_timeout)
         
         # Initialize components
-        self.db = DatabaseManager(self.database_file)
+        self.db = DatabaseManager(self.database_file, timeout=self.database_timeout)
         
         # Choose between API client and HTML scraper
         if self.use_api_client:
@@ -96,6 +96,7 @@ class RSDNBot:
             
         self.rsdn_url = os.getenv('RSDN_URL', 'https://rsdn.org')
         self.database_file = os.getenv('DATABASE_FILE', 'rsdn_messages.db')
+        self.database_timeout = float(os.getenv('DATABASE_TIMEOUT', '5.0'))
         
         # Parse monitored forums
         monitored_forums_str = os.getenv('MONITORED_FORUMS', '')

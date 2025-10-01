@@ -14,13 +14,18 @@ logger = logging.getLogger(__name__)
 class MigrationManager:
     """Manages database schema migrations"""
     
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, timeout: float):
         self.db_path = Path(db_path)
+        self.timeout = timeout
         self._ensure_migrations_table()
+    
+    def _connect(self):
+        """Create a database connection with configured timeout"""
+        return sqlite3.connect(self.db_path, timeout=self.timeout)
     
     def _ensure_migrations_table(self):
         """Create migrations tracking table if it doesn't exist"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -34,7 +39,7 @@ class MigrationManager:
     
     def get_current_version(self) -> int:
         """Get the current database schema version"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT MAX(version) FROM schema_migrations")
             result = cursor.fetchone()[0]
@@ -42,7 +47,7 @@ class MigrationManager:
     
     def is_migration_applied(self, version: int) -> bool:
         """Check if a specific migration version has been applied"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT 1 FROM schema_migrations WHERE version = ?",
@@ -52,7 +57,7 @@ class MigrationManager:
     
     def record_migration(self, version: int, name: str, description: str = ""):
         """Record that a migration has been applied"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO schema_migrations (version, name, description)
@@ -73,7 +78,7 @@ class MigrationManager:
         logger.info(f"   Description: {description}")
         
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 # Execute the migration
                 migration_func(conn)
                 conn.commit()
@@ -185,13 +190,13 @@ class MigrationManager:
         logger.info("   ✅ Schema migration completed")
 
 
-def run_migrations(db_path: str = 'rsdn_messages.db'):
+def run_migrations(db_path: str, timeout: float):
     """
     Convenience function to run all pending migrations.
     Safe to call on every application startup.
     """
     logger.info("🚀 Starting database migration check...")
-    manager = MigrationManager(db_path)
+    manager = MigrationManager(db_path, timeout=timeout)
     manager.run_all_migrations()
     logger.info("🎉 Migration check complete")
 

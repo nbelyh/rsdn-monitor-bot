@@ -31,13 +31,18 @@ class ForumMessage:
 class DatabaseManager:
     """Manages SQLite database for storing seen messages"""
     
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, timeout: float):
         self.db_path = Path(db_path)
+        self.timeout = timeout
         self.init_database()
+    
+    def _connect(self):
+        """Create a database connection with configured timeout"""
+        return sqlite3.connect(self.db_path, timeout=self.timeout)
     
     def init_database(self):
         """Initialize the database with required tables"""        
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS seen_messages (
@@ -87,7 +92,7 @@ class DatabaseManager:
     
     def is_message_seen(self, message_id: str) -> bool:
         """Check if a message has been seen before"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT 1 FROM seen_messages WHERE message_id = ?", 
@@ -97,7 +102,7 @@ class DatabaseManager:
     
     def add_message(self, message: ForumMessage):
         """Add a new message to the database"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT OR REPLACE INTO seen_messages 
@@ -128,7 +133,7 @@ class DatabaseManager:
     
     def update_message_replies(self, message: ForumMessage):
         """Update reply count and last reply author for existing message"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE seen_messages 
@@ -139,7 +144,7 @@ class DatabaseManager:
     
     def cleanup_old_messages(self, days: int = 30):
         """Remove messages older than specified days"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 DELETE FROM seen_messages 
@@ -151,7 +156,7 @@ class DatabaseManager:
     
     def get_recent_messages(self, hours: int = 24) -> List[ForumMessage]:
         """Get messages from the last N hours for cache optimization"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT message_id, title, author, forum, time_posted, 
@@ -180,7 +185,7 @@ class DatabaseManager:
     
     def get_stats(self) -> dict:
         """Get database statistics"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM seen_messages")
             total_messages = cursor.fetchone()[0]
@@ -200,7 +205,7 @@ class DatabaseManager:
     
     def get_all_forums(self) -> List[str]:
         """Get list of all forums that have messages in the database"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT DISTINCT forum 
@@ -211,7 +216,7 @@ class DatabaseManager:
     
     def get_chat_blocked_forums(self, chat_id: str) -> set:
         """Get list of forums blocked by chat"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT preference_value 
@@ -227,7 +232,7 @@ class DatabaseManager:
     
     def block_forum_for_chat(self, chat_id: str, forum: str):
         """Block a forum for a specific chat"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT OR IGNORE INTO chat_preferences 
@@ -239,7 +244,7 @@ class DatabaseManager:
     
     def unblock_forum_for_chat(self, chat_id: str, forum: str):
         """Unblock a forum for a specific chat"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 DELETE FROM chat_preferences 
@@ -250,7 +255,7 @@ class DatabaseManager:
     
     def reset_chat_forum_filters(self, chat_id: str):
         """Reset all forum filters for a chat"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 DELETE FROM chat_preferences 
@@ -264,7 +269,7 @@ class DatabaseManager:
     # Multi-chat support methods (treating each chat as a "user" for simplicity)
     def register_chat(self, chat_id: str, chat_title: str = None):
         """Register a chat for notifications"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT OR REPLACE INTO chat_preferences 
@@ -284,7 +289,7 @@ class DatabaseManager:
     
     def unregister_chat(self, chat_id: str):
         """Unregister a chat from notifications"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM chat_preferences WHERE chat_id = ?", (chat_id,))
             conn.commit()
@@ -292,7 +297,7 @@ class DatabaseManager:
     
     def is_chat_registered(self, chat_id: str) -> bool:
         """Check if a chat is registered for notifications"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT 1 FROM chat_preferences 
@@ -302,7 +307,7 @@ class DatabaseManager:
     
     def get_all_registered_chats(self) -> List[str]:
         """Get list of all registered chat IDs"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT chat_id FROM chat_preferences 
@@ -313,7 +318,7 @@ class DatabaseManager:
     
     def get_registered_chats_count(self) -> int:
         """Get count of registered chats"""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT COUNT(*) FROM chat_preferences 
