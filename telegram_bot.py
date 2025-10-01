@@ -504,7 +504,7 @@ class TelegramBotHandler:
                 BotCommand("stop", "🛑 Отписаться от уведомлений"),
                 BotCommand("status", "📊 Показать статус бота"),
                 BotCommand("stats", "📈 Статистика сообщений"),
-                BotCommand("filters", "� Управление фильтрами форумов")
+                BotCommand("filters", "🔽 Управление фильтрами форумов")
             ]
             
             await self.application.bot.set_my_commands(commands)
