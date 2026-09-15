@@ -64,7 +64,7 @@ class RSDNAPIClient:
         # Session for HTTP requests
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'RSDN-Bot/1.0 (Python)',
+            'User-Agent': 'RSDN-Monitor/1.0 (Python)',  # rsdn.org returns 403 for UAs containing "bot"
             'Content-Type': 'text/xml; charset=utf-8',
             'Accept-Encoding': 'gzip, deflate'
         })
