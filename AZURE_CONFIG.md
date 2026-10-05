@@ -5,6 +5,13 @@
 - **Location**: West Europe
 - **App Service Plan**: `rsdnbot-plan`
 - **Web App Name**: `rsdnbot-monitor`
+- **Subscription**: Pay-As-You-Go (`nbelyh@hotmail.com`)
+
+## Deployment
+Every push to `master` on GitHub deploys via GitHub Actions (`.github/workflows/deploy.yml`):
+the tracked files are zipped with `git archive` and zip-deployed with the publish profile stored in the
+`AZURE_WEBAPP_PUBLISH_PROFILE` repository secret; App Service runs the Oryx build
+(`SCM_DO_BUILD_DURING_DEPLOYMENT=true`). A deploy can also be started manually from the Actions tab.
 
 ## Monitoring Commands
 
@@ -31,11 +38,12 @@ az webapp show --name rsdnbot-monitor --resource-group rsdnbot-rg --query "state
 ## Useful URLs
 - **App URL**: https://rsdnbot-monitor.azurewebsites.net
 - **Kudu Console**: https://rsdnbot-monitor.scm.azurewebsites.net
-- **Git Repository**: https://rsdnbot-monitor.scm.azurewebsites.net/rsdnbot-monitor.git
+- **Source Repository**: https://github.com/nbelyh/rsdn-monitor-bot
 
 ## Database Location
-- **File**: `/home/site/wwwroot/rsdn_messages.db`
-- **To delete**: `rm /home/site/wwwroot/rsdn_messages.db` (via SSH or Kudu)
+- **File**: `/home/data/rsdn_messages.db` (`DATABASE_FILE` app setting)
+- Kept outside `/home/site/wwwroot` so deployments never touch it
+- **To delete**: `rm /home/data/rsdn_messages.db` (via SSH or Kudu)
 
 ## Environment Variables
 The app gets configuration from:

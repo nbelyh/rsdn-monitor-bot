@@ -384,10 +384,7 @@ author=last_reply_author if (replies_count > 0 and last_reply_author) else autho
 
 ### Git Integration
 ```bash
-# Deploy to Azure
-git push azure master
-
-# Deploy to GitLab (backup)
+# Deploy to Azure: push to GitHub, GitHub Actions deploys master
 git push origin master
 ```
 

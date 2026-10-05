@@ -78,7 +78,7 @@ python main.py        # Standalone mode
 
 ### Azure Deployment  
 ```bash
-git push azure master  # Triggers automatic deployment
+git push origin master  # GitHub Actions deploys master to Azure
 # Uses app.py Flask wrapper, runs via Gunicorn
 ```
 
