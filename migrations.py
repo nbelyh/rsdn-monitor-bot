@@ -21,7 +21,8 @@ class MigrationManager:
     
     def _connect(self):
         """Create a database connection with configured timeout"""
-        return sqlite3.connect(self.db_path, timeout=self.timeout)
+        from database import connect_sqlite
+        return connect_sqlite(self.db_path, self.timeout)
     
     def _ensure_migrations_table(self):
         """Create migrations tracking table if it doesn't exist"""

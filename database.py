@@ -7,6 +7,15 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+def connect_sqlite(db_path, timeout: float) -> sqlite3.Connection:
+    """Open SQLite connection that is safe on Azure App Service /home (an SMB share)"""
+    conn = sqlite3.connect(db_path, timeout=timeout)
+    # Default DELETE journal mode removes the journal after every commit; on SMB the
+    # delete can get stuck "pending", after which every write fails with "disk I/O error".
+    # TRUNCATE keeps the journal file and just empties it.
+    conn.execute("PRAGMA journal_mode=TRUNCATE")
+    return conn
+
 def normalize_nick(nick: str) -> str:
     """Normalize RSDN nickname for case-insensitive comparison"""
     return nick.strip().casefold()
@@ -66,7 +75,7 @@ class DatabaseManager:
     
     def _connect(self):
         """Create a database connection with configured timeout"""
-        return sqlite3.connect(self.db_path, timeout=self.timeout)
+        return connect_sqlite(self.db_path, self.timeout)
     
     def init_database(self):
         """Initialize the database with required tables"""        

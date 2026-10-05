@@ -41,9 +41,10 @@ az webapp show --name rsdnbot-monitor --resource-group rsdnbot-rg --query "state
 - **Source Repository**: https://github.com/nbelyh/rsdn-monitor-bot
 
 ## Database Location
-- **File**: `/home/data/rsdn_messages.db` (`DATABASE_FILE` app setting)
+- **File**: `/home/data/rsdnbot.db` (`DATABASE_FILE` app setting)
 - Kept outside `/home/site/wwwroot` so deployments never touch it
-- **To delete**: `rm /home/data/rsdn_messages.db` (via SSH or Kudu)
+- `/home` is an SMB share: SQLite runs with `journal_mode=TRUNCATE` (see `connect_sqlite` in `database.py`); don't open the DB with `sqlite3` from Kudu while the app is running
+- **To delete**: `rm /home/data/rsdnbot.db` (via SSH or Kudu)
 
 ## Environment Variables
 The app gets configuration from:
