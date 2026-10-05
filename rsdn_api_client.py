@@ -7,7 +7,7 @@ import logging
 import requests
 import xml.etree.ElementTree as ET
 from typing import List, Dict, Tuple, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import base64
 
 # Import ForumMessage from database module
@@ -15,6 +15,9 @@ from database import ForumMessage
 from text_cleaner import clean_message_text
 
 logger = logging.getLogger(__name__)
+
+# RSDN API returns message dates in Moscow time (UTC+3, no DST since 2014)
+RSDN_UTC_OFFSET = timedelta(hours=3)
 
 
 class RSDNAPIClient:
@@ -436,12 +439,12 @@ class RSDNAPIClient:
             return []
 
     def _parse_datetime(self, dt_str: str) -> datetime:
-        """Parse datetime from SOAP response (ISO 8601 format)"""
+        """Parse datetime from SOAP response (ISO 8601 format, Moscow time) into naive UTC"""
         try:
             # Handle format: 2025-09-30T14:23:45.123
             if '.' in dt_str:
                 dt_str = dt_str.split('.')[0]  # Remove microseconds
-            return datetime.fromisoformat(dt_str.replace('Z', ''))
+            return datetime.fromisoformat(dt_str.replace('Z', '')) - RSDN_UTC_OFFSET
         except Exception as e:
             logger.debug(f"Failed to parse datetime '{dt_str}': {e}")
             return datetime.utcnow()
