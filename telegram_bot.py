@@ -6,6 +6,8 @@ from telegram.constants import ParseMode
 from telegram.error import Forbidden, TelegramError
 import html
 
+from database import normalize_nick
+
 logger = logging.getLogger(__name__)
 
 class TelegramNotifier:
@@ -43,7 +45,18 @@ class TelegramNotifier:
         try:
             # Get chat's blocked forums and filter them out
             chat_blocked_forums = self.db.get_chat_blocked_forums(chat_id)
-            if chat_blocked_forums:
+            nick = self.db.get_chat_rsdn_nick(chat_id)
+            if nick and self.db.is_own_topics_mode(chat_id):
+                # Only new topics (respecting forum filters) and replies in topics the user posted in
+                filtered_messages = [
+                    msg for msg in messages
+                    if normalize_nick(msg.author) != normalize_nick(nick) and (
+                        (msg.is_new_topic and msg.forum not in chat_blocked_forums)
+                        or (not msg.is_new_topic and msg.root_topic_id
+                            and self.db.is_topic_participant(msg.root_topic_id, nick))
+                    )
+                ]
+            elif chat_blocked_forums:
                 filtered_messages = [msg for msg in messages if msg.forum not in chat_blocked_forums]
             else:
                 filtered_messages = messages
@@ -206,10 +219,16 @@ class TelegramBotHandler:
 /status - Показать статус бота
 /stats - Показать статистику сообщений
 /filters - Управление фильтрами форумов
+/nick - Указать свой ник на RSDN
+/mine - Только новые темы и ответы в моих темах
 
 <b>Как фильтровать форумы:</b>
 • Используйте команду /filters для интерактивного управления
 • Все функции доступны в одном меню: блокировка, разблокировка, сброс фильтров
+
+<b>Только мои темы:</b>
+• Укажите свой ник: /nick &lt;ник&gt;
+• Включите режим /mine — будут приходить только новые темы и ответы в темах, где вы участвовали
 
 Бот автоматически сканирует форум {interval_text}.
         """
@@ -295,6 +314,50 @@ class TelegramBotHandler:
             logger.error(f"Error in stats command: {e}")
             await update.message.reply_text("❌ Ошибка при получении статистики")
     
+    async def nick_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /nick command - show or set RSDN nickname for this chat"""
+        chat_id = str(update.effective_chat.id)
+
+        if context.args:
+            nick = ' '.join(context.args).strip()
+            self.db.set_chat_rsdn_nick(chat_id, nick)
+            text = f"✅ Ваш ник на RSDN: <b>{html.escape(nick)}</b>"
+            if not self.db.is_own_topics_mode(chat_id):
+                text += ("\n\nВключите режим /mine, чтобы получать только новые темы "
+                         "и ответы в темах, где вы участвовали.")
+        else:
+            nick = self.db.get_chat_rsdn_nick(chat_id)
+            if nick:
+                text = (f"👤 Ваш ник на RSDN: <b>{html.escape(nick)}</b>\n\n"
+                        "Чтобы изменить: /nick &lt;ник&gt;")
+            else:
+                text = ("👤 Ник на RSDN не указан.\n\n"
+                        "Укажите его: /nick &lt;ник&gt;")
+
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
+    async def mine_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /mine command - toggle "only new topics and my topics" mode"""
+        chat_id = str(update.effective_chat.id)
+        nick = self.db.get_chat_rsdn_nick(chat_id)
+
+        if self.db.is_own_topics_mode(chat_id):
+            self.db.set_own_topics_mode(chat_id, False)
+            text = ("📢 Режим «только мои темы» выключен.\n\n"
+                    "Теперь вы получаете все новые сообщения.")
+        elif not nick:
+            text = ("❌ Сначала укажите свой ник на RSDN:\n"
+                    "/nick &lt;ник&gt;")
+        else:
+            self.db.set_own_topics_mode(chat_id, True)
+            text = (f"🎯 Режим «только мои темы» включён для <b>{html.escape(nick)}</b>.\n\n"
+                    "Вы будете получать:\n"
+                    "• новые темы (с учётом /filters)\n"
+                    "• ответы в темах, где вы участвовали\n\n"
+                    "Повторите /mine, чтобы снова получать все сообщения.")
+
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
     def _create_forum_index_map(self, forums: List[str]) -> dict:
         """Create a mapping of short indices to forum names for callback data"""
         # Sort forums to ensure consistent ordering
@@ -476,6 +539,8 @@ class TelegramBotHandler:
         self.application.add_handler(CommandHandler("status", self.status_command))
         self.application.add_handler(CommandHandler("stats", self.stats_command))
         self.application.add_handler(CommandHandler("filters", self.filters_command))
+        self.application.add_handler(CommandHandler("nick", self.nick_command))
+        self.application.add_handler(CommandHandler("mine", self.mine_command))
         self.application.add_handler(CallbackQueryHandler(self.button_callback))
     
     async def start_bot(self):
@@ -504,7 +569,9 @@ class TelegramBotHandler:
                 BotCommand("stop", "🛑 Отписаться от уведомлений"),
                 BotCommand("status", "📊 Показать статус бота"),
                 BotCommand("stats", "📈 Статистика сообщений"),
-                BotCommand("filters", "🔽 Управление фильтрами форумов")
+                BotCommand("filters", "🔽 Управление фильтрами форумов"),
+                BotCommand("nick", "👤 Указать свой ник на RSDN"),
+                BotCommand("mine", "🎯 Только новые темы и ответы в моих темах")
             ]
             
             await self.application.bot.set_my_commands(commands)

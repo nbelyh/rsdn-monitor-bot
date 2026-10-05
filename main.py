@@ -140,6 +140,9 @@ class RSDNBot:
             self.logger.info(f"Found {len(new_messages)} new messages")
             
             if new_messages:
+                # Make sure we know who participated in topics with new replies
+                self.load_reply_topics_participants(new_messages)
+
                 # Send notifications
                 await self.telegram_notifier.send_new_messages(
                     new_messages, 
@@ -157,6 +160,18 @@ class RSDNBot:
             except:
                 pass
     
+    def load_reply_topics_participants(self, messages: List[ForumMessage]):
+        """Load full participant lists for topics with new replies (needed for "only my topics" mode)"""
+        if not hasattr(self.scraper, 'load_topic_participants'):
+            return
+        if not self.db.has_own_topics_mode_chats():
+            return
+
+        reply_topics = [m.root_topic_id for m in messages if not m.is_new_topic and m.root_topic_id]
+        unloaded = self.db.get_unloaded_topics(reply_topics)
+        if unloaded:
+            self.scraper.load_topic_participants(unloaded)
+
     async def test_connections(self) -> bool:
         """Test all external connections"""
         self.logger.info("Testing connections...")

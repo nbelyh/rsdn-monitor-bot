@@ -7,6 +7,7 @@ A Telegram bot that monitors the RSDN.org forum for new messages and sends notif
 - 🔄 Periodic scanning of RSDN forum (configurable interval)
 - 📱 Telegram notifications for new posts
 - 🎯 Forum-specific filtering (monitor specific forums)
+- 🙋 "Only my topics" mode: new topics + replies in topics you posted in (`/nick`, `/mine`)
 - 📊 Built-in statistics and status commands
 - 🗃️ SQLite database for tracking seen messages
 - 🛡️ Duplicate detection to avoid spam

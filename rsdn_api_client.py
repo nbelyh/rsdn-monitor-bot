@@ -311,7 +311,10 @@ class RSDNAPIClient:
         logger.debug(f"API returned {len(all_messages)} total messages in response")
         
         filtered_count = 0
-        
+
+        # Record topic participants from all messages (including old ones filtered below)
+        self._record_participants(all_messages)
+
         for msg in all_messages:
             try:
                 # Extract message fields
@@ -358,7 +361,9 @@ class RSDNAPIClient:
                     replies_count=0,  # Not directly available in single message
                     last_reply_author=user_nick,
                     url=url,
-                    last_message_text=content  # Use 'last_message_text' not 'content'
+                    last_message_text=content,  # Use 'last_message_text' not 'content'
+                    topic_id=topic_id,
+                    parent_id=parent_id
                 )
                 
                 messages.append(forum_message)
@@ -369,9 +374,67 @@ class RSDNAPIClient:
         
         logger.debug(f"Filtered out {filtered_count} messages older than {recent_minutes} minutes")
         logger.debug(f"Returning {len(messages)} recent messages")
-        
+
         return messages
-    
+
+    def _extract_participants(self, messages: List[ET.Element]) -> List[Tuple[str, str]]:
+        """Extract (root_topic_id, author_nick) pairs from JanusMessageInfo elements"""
+        participants = []
+        for msg in messages:
+            try:
+                message_id = msg.find('janus:messageId', self.ns).text
+                topic_id = msg.find('janus:topicId', self.ns).text
+                user_nick = msg.find('janus:userNick', self.ns).text
+                if user_nick:
+                    root_topic_id = topic_id if topic_id != '0' else message_id
+                    participants.append((root_topic_id, user_nick))
+            except Exception as e:
+                logger.debug(f"Failed to extract participant: {e}")
+        return participants
+
+    def _record_participants(self, messages: List[ET.Element]):
+        """Save topic participants to database"""
+        if not self.db_manager:
+            return
+        try:
+            self.db_manager.add_topic_participants(self._extract_participants(messages))
+        except Exception as e:
+            logger.error(f"Failed to record topic participants: {e}")
+
+    def load_topic_participants(self, topic_ids: List[str]) -> List[str]:
+        """
+        Load full participant lists for topics via GetTopicByMessage
+
+        Args:
+            topic_ids: Root message IDs of topics to load
+
+        Returns:
+            List of topic IDs that were loaded successfully
+        """
+        if not topic_ids or not self.db_manager:
+            return []
+
+        ids_xml = ''.join(f"<int>{tid}</int>" for tid in topic_ids)
+        body = f"""      <topicRequest>
+        <userName>{self.username}</userName>
+        <password>{self.password}</password>
+        <messageIds>{ids_xml}</messageIds>
+      </topicRequest>"""
+
+        try:
+            root = self._make_soap_request('GetTopicByMessage', body)
+            participants = self._extract_participants(root.findall('.//janus:JanusMessageInfo', self.ns))
+            self.db_manager.add_topic_participants(participants)
+
+            loaded = [tid for tid in topic_ids if any(p[0] == tid for p in participants)]
+            self.db_manager.mark_topics_loaded(loaded)
+            logger.info(f"Loaded participants for {len(loaded)}/{len(topic_ids)} topics")
+            return loaded
+
+        except Exception as e:
+            logger.error(f"Failed to load topic participants: {e}")
+            return []
+
     def _parse_datetime(self, dt_str: str) -> datetime:
         """Parse datetime from SOAP response (ISO 8601 format)"""
         try:

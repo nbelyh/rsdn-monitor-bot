@@ -95,6 +95,31 @@ preference_key: "blocked_forum"
 preference_value: "humour"
 ```
 
+#### RSDN Nickname / "Only My Topics" Mode
+```sql
+chat_id: "123456789", preference_key: "rsdn_nick", preference_value: "koenig"
+chat_id: "123456789", preference_key: "own_topics_only", preference_value: "true"
+```
+
+### 🧵 topic_participants
+**Purpose**: Who posted in each topic (for "only my topics" mode)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `topic_id` | TEXT (PK) | Root message ID of the topic |
+| `author` | TEXT (PK) | Normalized (casefolded) author nick |
+| `last_seen` | TIMESTAMP | Last time this author was seen in the topic |
+
+### 📥 loaded_topics
+**Purpose**: Topics whose full participant list was fetched via `GetTopicByMessage`
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `topic_id` | TEXT (PK) | Root message ID of the topic |
+| `loaded_at` | TIMESTAMP | When the topic was loaded |
+
+Both tables are cleaned up for topics inactive for 30+ days (daily cleanup job).
+
 ## Data Flow
 
 ### 1. Message Processing

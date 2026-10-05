@@ -342,6 +342,13 @@ author=last_reply_author if (replies_count > 0 and last_reply_author) else autho
 - `/block_forum <id>` - Block specific forum in this chat
 - `/unblock_forum <id>` - Unblock specific forum in this chat
 - `/help` - Display command list
+- `/nick <nick>` - Link the chat to an RSDN nickname
+- `/mine` - Toggle "only my topics" mode: only new topics and replies in topics where the linked nick has posted (own posts are skipped). API mode only.
+
+### "Only My Topics" Mode
+- `topic_participants` stores normalized author nicks per topic root ID; filled from every `GetNewData` response.
+- When a reply arrives in a topic not in `loaded_topics` (and at least one chat uses the mode), the full topic is fetched via `GetTopicByMessage` (batched, one call per scan) so earlier participation is known too.
+- Forum filters (`/filters`) apply to new topics only; replies in your topics are always delivered.
 
 ### Message Format
 ```

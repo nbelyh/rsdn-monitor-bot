@@ -7,6 +7,10 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+def normalize_nick(nick: str) -> str:
+    """Normalize RSDN nickname for case-insensitive comparison"""
+    return nick.strip().casefold()
+
 @dataclass
 class ForumMessage:
     """Represents a forum message from RSDN"""
@@ -19,7 +23,23 @@ class ForumMessage:
     last_reply_author: Optional[str]
     url: str
     last_message_text: Optional[str] = None  # Latest reply content for notifications
-    
+    topic_id: Optional[str] = None  # RSDN topicId ("0" for topic starters), API mode only
+    parent_id: Optional[str] = None  # RSDN parentId ("0" for topic starters), API mode only
+
+    @property
+    def root_topic_id(self) -> Optional[str]:
+        """ID of the topic starter message (None if unknown, e.g. in scraper mode)"""
+        if self.topic_id is None:
+            return None
+        return self.topic_id if self.topic_id != '0' else self.message_id
+
+    @property
+    def is_new_topic(self) -> bool:
+        """True if this message starts a new topic"""
+        if self.parent_id is not None:
+            return self.parent_id == '0'
+        return self.replies_count == 0
+
     def __hash__(self):
         return hash(self.message_id)
     
@@ -94,7 +114,25 @@ class DatabaseManager:
                 CREATE INDEX IF NOT EXISTS idx_chat_prefs 
                 ON chat_preferences(chat_id)
             """)
-            
+
+            # Topic participants (normalized author nicks per topic) for "only my topics" mode
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS topic_participants (
+                    topic_id TEXT NOT NULL,
+                    author TEXT NOT NULL,
+                    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (topic_id, author)
+                )
+            """)
+
+            # Topics whose full participant list was loaded from RSDN API
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS loaded_topics (
+                    topic_id TEXT PRIMARY KEY,
+                    loaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             conn.commit()
             logger.info("Database initialized successfully")
     
@@ -159,6 +197,20 @@ class DatabaseManager:
                 WHERE first_seen < datetime('now', '-{} days')
             """.format(days))
             deleted = cursor.rowcount
+
+            # Drop participant data for topics without recent activity
+            # (they will be reloaded from the API if they become active again)
+            cursor.execute("""
+                DELETE FROM topic_participants WHERE topic_id IN (
+                    SELECT topic_id FROM topic_participants
+                    GROUP BY topic_id
+                    HAVING MAX(last_seen) < datetime('now', '-{} days')
+                )
+            """.format(days))
+            cursor.execute("""
+                DELETE FROM loaded_topics
+                WHERE loaded_at < datetime('now', '-{} days')
+            """.format(days))
             conn.commit()
             logger.info(f"Cleaned up {deleted} old messages")
     
@@ -387,3 +439,105 @@ class DatabaseManager:
             
             result = cursor.fetchone()
             return int(result[0]) if result else 0
+
+    def _get_single_preference(self, chat_id: str, key: str) -> Optional[str]:
+        """Get a single-valued chat preference"""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT preference_value FROM chat_preferences
+                WHERE chat_id = ? AND preference_key = ?
+            """, (chat_id, key))
+            result = cursor.fetchone()
+            return result[0] if result else None
+
+    def _set_single_preference(self, chat_id: str, key: str, value: Optional[str]):
+        """Set (or delete, if value is None) a single-valued chat preference"""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            # Delete old value first (needed because primary key includes preference_value)
+            cursor.execute("""
+                DELETE FROM chat_preferences
+                WHERE chat_id = ? AND preference_key = ?
+            """, (chat_id, key))
+            if value is not None:
+                cursor.execute("""
+                    INSERT INTO chat_preferences
+                    (chat_id, preference_key, preference_value, updated_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                """, (chat_id, key, value))
+            conn.commit()
+
+    def get_chat_rsdn_nick(self, chat_id: str) -> Optional[str]:
+        """Get RSDN nickname linked to a chat"""
+        return self._get_single_preference(chat_id, 'rsdn_nick')
+
+    def set_chat_rsdn_nick(self, chat_id: str, nick: Optional[str]):
+        """Link RSDN nickname to a chat (None to unlink)"""
+        self._set_single_preference(chat_id, 'rsdn_nick', nick)
+        logger.info(f"Set RSDN nick for chat {chat_id}: {nick}")
+
+    def is_own_topics_mode(self, chat_id: str) -> bool:
+        """Check if chat wants only new topics and replies in topics it participated in"""
+        return self._get_single_preference(chat_id, 'own_topics_only') == 'true'
+
+    def set_own_topics_mode(self, chat_id: str, enabled: bool):
+        """Enable/disable "only my topics" mode for a chat"""
+        self._set_single_preference(chat_id, 'own_topics_only', 'true' if enabled else None)
+        logger.info(f"Own topics mode for chat {chat_id}: {enabled}")
+
+    def has_own_topics_mode_chats(self) -> bool:
+        """Check if any registered chat uses "only my topics" mode"""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 1 FROM chat_preferences
+                WHERE preference_key = 'own_topics_only' AND preference_value = 'true'
+                LIMIT 1
+            """)
+            return cursor.fetchone() is not None
+
+    def add_topic_participants(self, participants: List[Tuple[str, str]]):
+        """Record (topic_id, author_nick) pairs"""
+        rows = [(topic_id, normalize_nick(nick)) for topic_id, nick in participants if topic_id and nick]
+        if not rows:
+            return
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.executemany("""
+                INSERT INTO topic_participants (topic_id, author, last_seen)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(topic_id, author) DO UPDATE SET last_seen = CURRENT_TIMESTAMP
+            """, rows)
+            conn.commit()
+
+    def is_topic_participant(self, topic_id: str, nick: str) -> bool:
+        """Check if the given nick has posted in the topic"""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 1 FROM topic_participants
+                WHERE topic_id = ? AND author = ?
+            """, (topic_id, normalize_nick(nick)))
+            return cursor.fetchone() is not None
+
+    def get_unloaded_topics(self, topic_ids: List[str]) -> List[str]:
+        """Return topic IDs whose full participant list hasn't been loaded yet"""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            unloaded = []
+            for topic_id in dict.fromkeys(topic_ids):
+                cursor.execute("SELECT 1 FROM loaded_topics WHERE topic_id = ?", (topic_id,))
+                if cursor.fetchone() is None:
+                    unloaded.append(topic_id)
+            return unloaded
+
+    def mark_topics_loaded(self, topic_ids: List[str]):
+        """Mark topics as having their full participant list loaded"""
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.executemany("""
+                INSERT OR REPLACE INTO loaded_topics (topic_id, loaded_at)
+                VALUES (?, CURRENT_TIMESTAMP)
+            """, [(topic_id,) for topic_id in topic_ids])
+            conn.commit()
